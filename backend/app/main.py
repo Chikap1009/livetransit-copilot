@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -64,6 +65,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)
+
+# Serve the minimal live-map page at /web (same origin as the API -> no CORS for the WS).
+app.mount("/web", StaticFiles(directory="frontend", html=True), name="web")
 
 
 async def cached_json(key: str, ttl: int, compute):

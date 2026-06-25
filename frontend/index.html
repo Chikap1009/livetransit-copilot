@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiveTransit — Boston</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { position: absolute; inset: 0; }
+    #status {
+      position: absolute; top: 10px; left: 10px; z-index: 1;
+      background: rgba(0,0,0,0.75); color: #fff; padding: 8px 12px;
+      border-radius: 6px; font: 14px system-ui, sans-serif;
+    }
+    #status .dot { color: #f33; }
+    #status.ok .dot { color: #3f3; }
+  </style>
+</head>
+<body>
+  <div id="status"><span class="dot">●</span> connecting…</div>
+  <div id="map"></div>
+  <script>
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://demotiles.maplibre.org/style.json',  // free basemap, no API key
+      center: [-71.0589, 42.3601],                          // Boston
+      zoom: 11,
+    });
+
+    const EMPTY = { type: 'FeatureCollection', features: [] };
+
+    map.on('load', () => {
+      map.addSource('vehicles', { type: 'geojson', data: EMPTY });
+      map.addLayer({
+        id: 'vehicles',
+        type: 'circle',
+        source: 'vehicles',
+        paint: {
+          'circle-radius': 5,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff',
+          // Color the subway lines; everything else (bus/commuter rail) grey.
+          'circle-color': [
+            'match', ['get', 'route_id'],
+            'Red', '#DA291C',
+            'Orange', '#ED8B00',
+            'Blue', '#003DA5',
+            'Green-B', '#00843D', 'Green-C', '#00843D',
+            'Green-D', '#00843D', 'Green-E', '#00843D',
+            '#888888',
+          ],
+        },
+      });
+
+      // Click a dot -> popup with route + vehicle id.
+      map.on('click', 'vehicles', (e) => {
+        const p = e.features[0].properties;
+        new maplibregl.Popup()
+          .setLngLat(e.lngLat)
+          .setHTML(`<b>${p.route_id || '—'}</b><br>vehicle ${p.vehicle_id}`)
+          .addTo(map);
+      });
+      map.on('mouseenter', 'vehicles', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'vehicles', () => { map.getCanvas().style.cursor = ''; });
+
+      connect();
+    });
+
+    const status = document.getElementById('status');
+
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/ws/vehicles`);
+
+      ws.onopen = () => { status.classList.add('ok'); };
+      ws.onclose = () => {
+        status.classList.remove('ok');
+        status.innerHTML = '<span class="dot">●</span> disconnected — retrying…';
+        setTimeout(connect, 2000);  // auto-reconnect
+      };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        const features = msg.vehicles.map((v) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [v.lon, v.lat] },
+          properties: { vehicle_id: v.vehicle_id, route_id: v.route_id },
+        }));
+        map.getSource('vehicles').setData({ type: 'FeatureCollection', features });
+        status.innerHTML = `<span class="dot">●</span> live — ${features.length} vehicles`;
+      };
+    }
+  </script>
+</body>
+</html>
