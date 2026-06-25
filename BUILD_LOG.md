@@ -285,3 +285,29 @@ pgvector (Phase D), pushing the repo to GitHub remote (separate explained step).
 ### Next step
 Phase 0 **Concept Check** quiz (rule #10), then on success proceed to **Phase 1** (poller:
 fetch+decode MBTA VehiclePositions every ~10s, store, expose `GET /vehicles`).
+
+---
+
+## Entry 6 — Concept Check passed + pushed to GitHub
+**Date:** 2026-06-25
+**Phase:** Phase 0 → Phase 1 boundary
+
+### Concept Check (rule #10) — PASSED
+User answered all 4 (Docker isolation/clean-system/speed; PostGIS adds spatial types/functions;
+.env git-ignored secrets vs .env.example template; SRID + lon-before-lat). Corrections made:
+added "reproducibility" as Docker's headline benefit; sharpened PostGIS (geometry types + spatial
+functions + indexes); corrected SRID = **Spatial Reference (System) ID** (user guessed "port id"),
+4326 = WGS84 GPS lat/lon. Coordinate-order trap (lon, lat) recalled correctly.
+
+### GitHub push
+- Git identity on commits: `Chikap1009 <chiragkapoor1009@gmail.com>`.
+- Created **public** repo via github.com (empty, no auto-init to avoid history collision).
+- `git remote add origin https://github.com/Chikap1009/livetransit-copilot.git`
+- `git push -u origin main` — succeeded (credentials cached; no manual login needed).
+- Verified: `main...origin/main` in sync; 9 tracked files on GitHub; **`.env` NOT tracked**
+  (`git ls-files --error-unmatch .env` errors = good). Repo: https://github.com/Chikap1009/livetransit-copilot
+
+### Next step
+**Phase 1** — the live poller. Goal: fetch MBTA VehiclePositions `.pb` every ~10s, decode the
+protobuf with `gtfs-realtime-bindings`, store positions, expose `GET /vehicles` + `GET /health`
+via FastAPI. Learn first: HTTP, REST, protobuf, poller-as-separate-process, GTFS-RT.
