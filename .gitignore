@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# LiveTransit Copilot — .gitignore
+# Rule #7: secrets and large/regenerable files must NEVER enter git history.
+# ---------------------------------------------------------------------------
+
+# --- Secrets (THE critical ones — never commit) ---
+.env
+.env.*
+!.env.example          # but DO track the example template (no real values)
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# --- GTFS / real-time data dumps (large, regenerable) ---
+*.pb                   # decoded/raw GTFS-realtime protobuf dumps
+*.zip                  # static GTFS zips
+*.parquet              # history offloads
+data/                  # any local data dump folder
+
+# --- ML model artifacts (large binaries -> belong in R2, not git) ---
+*.lgb
+*.bin
+models/
+
+# --- Frontend (Next.js) build artifacts ---
+node_modules/
+.next/
+out/
+dist/
+
+# --- Editor / OS noise ---
+.DS_Store
+Thumbs.db
+.idea/
+*.log
