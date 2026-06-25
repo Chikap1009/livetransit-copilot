@@ -32,6 +32,31 @@
     const EMPTY = { type: 'FeatureCollection', features: [] };
 
     map.on('load', () => {
+      // --- Real MBTA network from Martin vector tiles (drawn BENEATH the dots) ---
+      const TILES = 'http://localhost:3000';   // Martin tile server (local dev)
+
+      map.addSource('routes', { type: 'vector', url: `${TILES}/route_shapes` });
+      map.addLayer({
+        id: 'routes', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
+        paint: { 'line-color': ['get', 'route_color'], 'line-width': 2, 'line-opacity': 0.85 },
+      });
+
+      map.addSource('stops', { type: 'vector', url: `${TILES}/stops` });
+      map.addLayer({
+        id: 'stops', type: 'circle', source: 'stops', 'source-layer': 'stops', minzoom: 13,
+        paint: {
+          'circle-radius': 3, 'circle-color': '#ffffff',
+          'circle-stroke-color': '#333333', 'circle-stroke-width': 1,
+        },
+      });
+      map.on('click', 'stops', (e) => {
+        new maplibregl.Popup()
+          .setLngLat(e.lngLat)
+          .setHTML(`<b>${e.features[0].properties.stop_name || 'stop'}</b>`)
+          .addTo(map);
+      });
+
+      // --- Live vehicles (added last so the dots sit on top of the network) ---
       map.addSource('vehicles', { type: 'geojson', data: EMPTY });
       map.addLayer({
         id: 'vehicles',
