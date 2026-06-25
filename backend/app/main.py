@@ -1,28 +1,52 @@
 """FastAPI app: REST endpoints over the live transit data."""
 import asyncio
+import json
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import redis.asyncio as redis
+from fastapi import FastAPI, Query
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from backend.app.core import config
 
+# How recent a position must be to count as a vehicle's "current" location.
+RECENT_WINDOW = "90 seconds"
+
 pool: AsyncConnectionPool | None = None
+rds: redis.Redis | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Open the DB connection pool at startup, close it at shutdown."""
-    global pool
+    """Open the DB pool + Redis client at startup, close them at shutdown."""
+    global pool, rds
     pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=5, open=False)
     await pool.open()
+    rds = redis.from_url(config.REDIS_URL, decode_responses=True)
     yield
+    await rds.aclose()
     await pool.close()
 
 
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)
+
+
+async def cached_json(key: str, ttl: int, compute):
+    """Return cached JSON for `key`, or run `compute()`, cache it (EX=ttl), return it."""
+    hit = await rds.get(key)
+    if hit is not None:
+        return json.loads(hit)
+    data = await compute()
+    await rds.set(key, json.dumps(data, default=str), ex=ttl)
+    return data
+
+
+async def fetch(sql: str, params) -> list[dict]:
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(sql, params)
+        return await cur.fetchall()
 
 
 @app.get("/health")
@@ -47,10 +71,48 @@ async def vehicles(route: str | None = None, limit: int = 2000):
         ORDER BY vehicle_id, recorded_at DESC
         LIMIT %s
     """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(sql, params)
-        rows = await cur.fetchall()
+    rows = await fetch(sql, params)
     return {"count": len(rows), "vehicles": rows}
+
+
+@app.get("/vehicles/near")
+async def vehicles_near(
+    lat: float = Query(...), lon: float = Query(...), radius_m: float = 500
+):
+    """Vehicles currently within `radius_m` of (lat, lon). Cached for 5s."""
+    # Convert metres to degrees so the GEOMETRY GiST index is used. Approximate
+    # (longitude degrees shrink with latitude) but fine for a "near me" feature.
+    radius_deg = radius_m / 111_320.0
+    sql = f"""
+        SELECT DISTINCT ON (vehicle_id)
+            vehicle_id, route_id, latitude, longitude, bearing, recorded_at
+        FROM vehicle_positions
+        WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s)
+          AND recorded_at >= now() - interval '{RECENT_WINDOW}'
+        ORDER BY vehicle_id, recorded_at DESC
+    """
+
+    async def compute():
+        rows = await fetch(sql, (lon, lat, radius_deg))
+        return {"count": len(rows), "vehicles": rows}
+
+    key = f"near:{round(lat, 4)}:{round(lon, 4)}:{int(radius_m)}"
+    return await cached_json(key, ttl=5, compute=compute)
+
+
+@app.get("/vehicles/cell/{h3}")
+async def vehicles_in_cell(h3: str):
+    """Vehicles currently in the given H3 neighborhood cell."""
+    sql = f"""
+        SELECT DISTINCT ON (vehicle_id)
+            vehicle_id, route_id, latitude, longitude, bearing, recorded_at
+        FROM vehicle_positions
+        WHERE h3_cell = %s
+          AND recorded_at >= now() - interval '{RECENT_WINDOW}'
+        ORDER BY vehicle_id, recorded_at DESC
+    """
+    rows = await fetch(sql, (h3,))
+    return {"count": len(rows), "cell": h3, "vehicles": rows}
 
 
 if __name__ == "__main__":
@@ -59,8 +121,7 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         # psycopg async requires a SelectorEventLoop. uvicorn would otherwise install
         # a ProactorEventLoop on Windows, so we build the loop ourselves and tell
-        # uvicorn not to touch it (loop="none"). No-op concern on Linux/Docker, where
-        # we just run `uvicorn backend.app.main:app` normally.
+        # uvicorn not to touch it (loop="none"). On Linux/Docker we just run uvicorn.
         import selectors
 
         loop = asyncio.SelectorEventLoop(selectors.SelectSelector())
