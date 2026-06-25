@@ -71,6 +71,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  tiles:
+    image: ghcr.io/maplibre/martin:latest
+    container_name: lt-tiles
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   processor:
     build: .
     container_name: lt-processor
