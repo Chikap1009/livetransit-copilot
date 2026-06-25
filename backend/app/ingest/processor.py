@@ -10,6 +10,7 @@ import argparse
 import logging
 from datetime import datetime, timezone
 
+import h3
 import psycopg
 import redis.asyncio as redis
 from redis.exceptions import ResponseError
@@ -27,9 +28,9 @@ BATCH = 500
 
 INSERT_SQL = """
     INSERT INTO vehicle_positions
-        (vehicle_id, trip_id, route_id, latitude, longitude, geom, bearing, recorded_at)
+        (vehicle_id, trip_id, route_id, latitude, longitude, geom, bearing, recorded_at, h3_cell)
     VALUES
-        (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s)
+        (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s)
     ON CONFLICT (vehicle_id, recorded_at) DO NOTHING
 """
 
@@ -39,9 +40,10 @@ def to_row(f: dict) -> tuple:
     ts = datetime.fromtimestamp(int(f["ts"]), tz=timezone.utc) if f.get("ts") else None
     lon, lat = float(f["lon"]), float(f["lat"])
     bearing = float(f["bearing"]) if f.get("bearing") else None
+    h3_cell = h3.latlng_to_cell(lat, lon, config.H3_RESOLUTION)
     return (
         f["vehicle_id"] or None, f["trip_id"] or None, f["route_id"] or None,
-        lat, lon, lon, lat, bearing, ts,
+        lat, lon, lon, lat, bearing, ts, h3_cell,
     )
 
 

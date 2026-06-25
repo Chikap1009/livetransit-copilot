@@ -26,3 +26,6 @@ MBTA_VEHICLE_POSITIONS_URL = os.environ.get(
 
 # How often the poller fetches the feed (seconds).
 POLL_INTERVAL_SECONDS = float(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
+
+# H3 hexagon resolution for tagging positions (8 ≈ 0.74 km^2, neighborhood-sized).
+H3_RESOLUTION = int(os.environ.get("H3_RESOLUTION", "8"))
