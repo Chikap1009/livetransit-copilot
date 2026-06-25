@@ -4,9 +4,12 @@
 # ---------------------------------------------------------------------------
 
 # --- Secrets (THE critical ones — never commit) ---
+# NOTE: gitignore comments must be on their OWN line — an inline '#' becomes part
+# of the pattern and silently breaks the rule.
 .env
 .env.*
-!.env.example          # but DO track the example template (no real values)
+# ...but DO track the example template (no real values):
+!.env.example
 
 # --- Python ---
 __pycache__/

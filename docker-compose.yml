@@ -1,0 +1,44 @@
+# docker-compose.yml — local dev stack for LiveTransit Copilot (Phase 0)
+#
+# Brings up two containers as one group:
+#   - postgres : PostgreSQL 16 with PostGIS baked in (our spatial database)
+#   - redis    : Redis 7 (cache + streaming queue, used more from Phase 2 on)
+#
+# Secrets live in .env (git-ignored); this file holds only placeholders, so it is
+# safe to commit. Start with:  docker compose up -d
+services:
+  postgres:
+    image: postgis/postgis:16-3.4          # Postgres 16 + PostGIS extension, prebuilt
+    container_name: lt-postgres
+    environment:                            # the official image reads these on first boot
+      POSTGRES_USER: ${POSTGRES_USER}       # filled from .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"                         # host:container
+    volumes:
+      - pgdata:/var/lib/postgresql/data     # persist DB data outside the container
+    healthcheck:                            # report "ready" only once it accepts connections
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: lt-redis
+    ports:
+      - "6379:6379"                         # host:container
+    volumes:
+      - redisdata:/data                     # persist Redis data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:                                    # named volumes managed by Docker
+  pgdata:
+  redisdata:
