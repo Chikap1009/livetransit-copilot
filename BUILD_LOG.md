@@ -484,3 +484,28 @@ vehicle + route filter) → JSON. Locked in: "poller writes in background, API r
 **Phase 2, Sub-step 2b:** H3 hexagon tagging. Add `h3_cell` column + the `h3` lib; processor
 computes the H3 cell per position. Teach H3 (hexagonal global grid, resolutions). Then 2c (GiST
 index + EXPLAIN ANALYZE speedup), 2d (spatial endpoints + caching).
+
+---
+
+## Entry 11 — Phase 2, Sub-step 2b: H3 hexagon tagging
+**Date:** 2026-06-26
+**Phase:** Phase 2 (streaming pipeline)
+
+### Concept taught
+- **H3**: Uber's hexagonal global grid; lat/lon -> stable hex id. Hexagons = equidistant
+  neighbors, uniform area, hierarchical. Lets "near me" be an equality match on the cell (no
+  geometry math). Resolution trade-off; chose **res 8** (~0.74 km² ≈ neighborhood).
+
+### What we did
+- Installed `h3==4.5.0` (v4 API: `h3.latlng_to_cell(lat, lon, res)` -> hex string).
+- Migration `0004_h3.sql`: `ALTER TABLE vehicle_positions ADD COLUMN h3_cell TEXT`.
+- Config `H3_RESOLUTION=8`. Processor computes + stores `h3_cell` per row (extra INSERT param).
+- Verified: new rows tagged; top-neighborhoods works as pure `GROUP BY h3_cell` (busiest hex 23
+  vehicles). Coverage: ~1k new rows tagged; ~25.7k older 2a rows remain NULL (historical, not
+  backfilled — would need Python; not worth it). Committed `3e47c46`.
+
+### Next step
+**Phase 2, Sub-step 2c:** GiST spatial index + measured speedup. Teach indexes (seq scan vs index
+scan, GiST/R-tree). Measure a "within 500 m" query with `EXPLAIN ANALYZE` BEFORE, add GiST index
+on geom + B-tree on h3_cell (migration 0005), measure AFTER, record the plan change + timing for
+METRICS/résumé. Then 2d (spatial endpoints + caching).
