@@ -1,0 +1,9 @@
+# Backend dependencies for LiveTransit Copilot.
+# Install into the project venv:
+#   .venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+httpx==0.28.1
+gtfs-realtime-bindings==2.0.0
+psycopg[binary]==3.3.4
+python-dotenv==1.2.2
