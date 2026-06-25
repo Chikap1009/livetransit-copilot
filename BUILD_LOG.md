@@ -183,3 +183,105 @@ a named volume for data persistence. Teach: Docker images, containers, services,
 **Phase 0, Step 5:** write `db/migrations/0001_init.sql` creating the static GTFS tables
 (`routes`, `stops` with `geom geometry(Point,4326)`, `trips`, `stop_times`, `shapes`). Teach:
 relational tables, primary/foreign keys, SRID 4326, and how GTFS CSVs map to tables.
+
+---
+
+## Entry 4 — Phase 0, Step 5: static GTFS schema created & applied
+**Date:** 2026-06-25
+**Phase:** Phase 0 (foundations)
+
+### Concepts taught
+- **Relational model**: tables/rows/columns; tables relate via shared IDs.
+- **Primary key** (unique row id) / **foreign key** (points to another table's PK, enforces
+  integrity). E.g. `trips.route_id → routes.route_id`; `stop_times` has composite PK
+  `(trip_id, stop_sequence)`.
+- **GTFS file → table mapping**: routes.txt→routes, stops.txt→stops, trips.txt→trips,
+  stop_times.txt→stop_times (the big one), shapes.txt→shapes.
+- **SRID 4326** = GPS lat/lon (WGS84). Stored as PostGIS `geometry(Point,4326)`. Trap: PostGIS
+  points are `(x,y)` = **(lon, lat)** — longitude first. Build with `ST_MakePoint(lon, lat)`.
+- **Migration** = versioned `.sql` schema-change script (numbered `0001_…`), tracked in git.
+
+### What we did
+1. Created **`db/migrations/0001_init.sql`** — 5 tables (routes, stops, trips, stop_times, shapes),
+   with `stops.geom` Point/4326 and `shapes.geom` LineString/4326. Kept only columns we'll use;
+   GiST indexes deferred to Phase 2 (to measure speedup).
+2. Applied it: piped the file into `psql` with `ON_ERROR_STOP=1`. 5× CREATE TABLE OK.
+3. Verified: `\dt` shows our 5 tables in `public`; `geometry_columns` confirms `stops.geom`
+   POINT/4326 and `shapes.geom` LINESTRING/4326.
+4. Committed `27fbbf0`.
+
+### Note (avoid confusion)
+`\dt` listed **42 tables** — most are from the PostGIS image's optional `postgis_tiger_geocoder`
+(`tiger` schema) and `postgis_topology` (`topology` schema) extensions. **Not ours; ignore them.**
+Our tables are the ones in the `public` schema. `public.spatial_ref_sys` is PostGIS's built-in
+coordinate-system reference table.
+
+### How to verify
+- `docker compose exec -T postgres psql -U livetransit -d livetransit -c "\dt public.*"`
+- Expect: routes, shapes, stop_times, stops, trips (+ spatial_ref_sys).
+
+### Next step
+**Phase 0, Step 6 (final):** download the MBTA static GTFS zip, write `db/load_static_gtfs.py` to
+parse the CSVs and insert rows (build `stops.geom` from lon/lat; stitch `shapes` LineStrings),
+then verify with row counts + a `ST_DWithin` "stops near downtown Boston" query. Then the Phase 0
+Concept Check.
+
+---
+
+## Entry 5 — Phase 0, Step 6: MBTA schedule loaded; Phase 0 COMPLETE
+**Date:** 2026-06-25
+**Phase:** Phase 0 (foundations)
+
+### Concepts taught
+- **Virtual environment (`.venv`)**: project-local isolated Python so packages don't clash across
+  projects. Installed `psycopg[binary]` (the `[binary]` = prebuilt wheel, no compiler needed).
+  Python 3.14 worry resolved — a `cp314` wheel of psycopg 3.3.4 installed cleanly.
+- **`COPY`**: PostgreSQL bulk-load path (one stream vs one round-trip per row). 10–100× faster;
+  used for the big tables. Analogy: one truck vs 2M letters.
+- **Shapes via aggregation**: GTFS shapes are scattered points; stitched into one LineString per
+  `shape_id` with `ST_MakeLine(point ORDER BY seq)` grouped by `shape_id` (HAVING count>=2).
+- **Idempotent loader**: `TRUNCATE ... CASCADE` first so re-running can't duplicate-key crash.
+
+### What we did (6a + 6b)
+1. Downloaded `data/MBTA_GTFS.zip` (24.7 MB). Inspected contents — `stop_times.txt` is 148 MB
+   (the big one), `shapes.txt` 16 MB, rest small.
+2. Created `.venv`; installed `psycopg[binary]==3.3.4`. Added `db/requirements.txt`.
+3. Wrote `db/load_static_gtfs.py` (stdlib csv/zipfile + psycopg; no pandas).
+4. **Bug #1 (caught & fixed):** `num()` made every value a float, so `route_type` "1" → "1.0",
+   rejected by the INTEGER column. Added an `integer()` helper; applied to route_type,
+   location_type, direction_id, stop_sequence, shape_pt_sequence.
+5. Re-ran — loaded in **51.3 s**: routes **403**, stops **10,308**, trips **121,935**,
+   stop_times **3,345,680**, shapes **1,150**.
+6. **Payoff query:** `ST_DWithin` found stops within 500 m of downtown Boston (Government Center
+   48–64 m, City Hall Plaza). Correct = stops are in Boston (not the ocean) → (lon, lat) order +
+   SRID 4326 verified.
+7. **Bug #2 (caught & fixed):** the GTFS section of `.gitignore` ALSO had inline comments, so
+   `*.pb/*.zip/*.parquet/data/` were silently NOT ignored (the 24 MB zip was at risk of being
+   committed). Moved comments to their own lines; verified `git check-ignore` now matches and no
+   inline-comment patterns remain anywhere in the file.
+
+### Commits
+- `62e8ae7` GTFS loader + requirements
+- `7049d64` fix .gitignore inline-comment bug (data section)
+(earlier: `13f7bde` init, `fc909c0` docker stack, `27fbbf0` schema)
+
+### How to verify Phase 0 (anytime)
+- `docker compose ps` → postgres + redis Up (healthy).
+- Row counts: `docker compose exec -T postgres psql -U livetransit -d livetransit -c "SELECT
+  (SELECT count(*) FROM routes) routes, (SELECT count(*) FROM stops) stops, (SELECT count(*) FROM
+  stop_times) stop_times;"`
+- Spatial query: the `ST_DWithin` downtown query returns Government Center etc.
+- `git status` clean; `.env`, `data/`, `*.zip` all untracked/ignored.
+
+### LESSONS / recurring gotchas
+- **gitignore inline comments break patterns** — hit this TWICE. Always put comments on their own
+  line. Worth remembering for the whole project.
+- COPY text format is strict about types: floats won't go into INTEGER columns.
+
+### Phase 0 status: ✅ COMPLETE (pending Concept Check quiz).
+Not yet done (intentionally, later phases): GiST/spatial indexes (Phase 2), TimescaleDB (Phase 5),
+pgvector (Phase D), pushing the repo to GitHub remote (separate explained step).
+
+### Next step
+Phase 0 **Concept Check** quiz (rule #10), then on success proceed to **Phase 1** (poller:
+fetch+decode MBTA VehiclePositions every ~10s, store, expose `GET /vehicles`).
