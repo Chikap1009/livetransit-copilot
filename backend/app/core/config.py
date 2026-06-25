@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT / ".env")
 
 # --- Database / cache ---
-DATABASE_URL = os.environ["DATABASE_URL"]
+# Optional at import time: not every process needs the DB (e.g. the poller only
+# publishes to Redis). Components that need it read it and connect explicitly.
+DATABASE_URL = os.environ.get("DATABASE_URL")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 # --- MBTA GTFS-Realtime feed ---

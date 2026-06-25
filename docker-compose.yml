@@ -60,12 +60,26 @@ services:
     container_name: lt-poller
     command: python -m backend.app.ingest.poller
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # The poller now only PUBLISHES to Redis (no DB access).
       REDIS_URL: redis://redis:6379/0
       MBTA_VEHICLE_POSITIONS_URL: https://cdn.mbta.com/realtime/VehiclePositions.pb
       POLL_INTERVAL_SECONDS: "10"
     depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  processor:
+    build: .
+    container_name: lt-processor
+    command: python -m backend.app.ingest.processor
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
