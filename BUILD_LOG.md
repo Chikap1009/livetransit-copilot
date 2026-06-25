@@ -565,3 +565,62 @@ services: postgres, redis, api, poller, processor).
 ### Next step
 Phase 2 **Concept Check** (stream vs direct writes; idempotency + dedupe key; GiST + EXPLAIN
 ANALYZE result; why hexagons). Then **Phase 3** (WebSockets + live map with fan-out).
+
+---
+
+## Entry 14 — Phase 3, Sub-step 3a: WebSocket + broadcaster (fan-out)
+**Date:** 2026-06-26
+**Phase:** Phase 3 (real-time frontend)
+
+### Phase 2 Concept Check — PASSED
+Stream=decoupling(+backpressure/resilience) ✓; idempotency corrected: dedupe key is the PAIR
+`(vehicle_id, recorded_at)` — we KEEP history (many rows/vehicle), only drop the exact same
+vehicle+timestamp repeat; "processing twice = no extra effect" ✓; GiST Seq Scan ~89ms → Index
+Scan ~1.4ms ✓; hexagons = equality match on cell vs geometry math ✓.
+
+### Concept taught
+- **WebSocket vs HTTP**: WS is a persistent 2-way connection; the server PUSHES (dot moves on its
+  own) vs HTTP's one-question-one-answer. **Fan-out**: one upstream read pushed to all clients.
+
+### What we did
+- `main.py`: `clients: set[WebSocket]`; `WS /ws/vehicles` (accept, add, prune on disconnect);
+  `broadcaster()` background task (started in lifespan) — every 2s does ONE `LIVE_SQL` read
+  (latest recent position per vehicle) and pushes to all clients (prunes dead ones).
+- Verified programmatically: installed `websockets` (dev), test client connected and received a
+  `positions` broadcast of **759 vehicles** within ~2s. Committed `29ec309`.
+
+### Next step
+**Phase 3, Sub-step 3b:** the MapLibre frontend page (live dots over a basemap via the WebSocket),
+served at `/web`. Teach MapLibre basics. Visual verification: dots move; two browser tabs both
+update from the same single feed (fan-out). Then Phase 3 Concept Check.
+
+---
+
+## Entry 15 — Phase 3, Sub-step 3b: live MapLibre map; PHASE 3 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 3 (real-time frontend)
+
+### Concept taught
+- **MapLibre**: style (free demotiles basemap, no key) + source (GeoJSON `vehicles`) + layer
+  (circles). On each WS message, `getSource('vehicles').setData(...)` -> dots move.
+
+### What we did
+- `frontend/index.html`: MapLibre from CDN, Boston center, circle layer colored by subway line
+  (Red/Orange/Blue/Green) else grey, click popup (route + vehicle id), status overlay, WS client
+  with auto-reconnect.
+- `main.py`: `app.mount("/web", StaticFiles(directory="frontend", html=True))` — served same-origin
+  so the WS has no CORS issue.
+- `docker-compose.yml`: api gets `./frontend:/app/frontend:ro` volume (edit HTML w/o rebuild).
+- **Gotcha:** `Invoke-WebRequest` needs `-UseBasicParsing` in this non-interactive PS shell.
+- Verified: `GET /web/` 200; **user confirmed in browser** — dots over Boston move every ~2s,
+  click popup shows route (e.g. "86") + vehicle (y1939), and TWO tabs update together (fan-out).
+  Committed `18cbdda`.
+
+### Phase 3 status: ✅ COMPLETE (pending Concept Check).
+Live map at http://localhost:8000/web/. (Minimal map; Phase C builds the Next.js+CopilotKit
+version. Phase 4 adds the real route/stop network as vector tiles under the dots.)
+
+### Next step
+Phase 3 **Concept Check** (WS vs HTTP; fan-out & why it scales; path from "new position processed"
+to "dot moves"). Then **Phase 4** (vector tiles: Martin/pg_tileserv serving routes+stops from
+PostGIS, rendered under the live dots).
