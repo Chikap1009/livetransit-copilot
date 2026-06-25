@@ -5,7 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -13,19 +13,52 @@ from backend.app.core import config
 
 # How recent a position must be to count as a vehicle's "current" location.
 RECENT_WINDOW = "90 seconds"
+BROADCAST_INTERVAL = 2  # seconds between live pushes to all WebSocket clients
 
 pool: AsyncConnectionPool | None = None
 rds: redis.Redis | None = None
 
+# Currently-connected live-map clients. ONE DB read per tick is pushed to all of
+# them — that single-read-serves-everyone is the "fan-out".
+clients: set[WebSocket] = set()
+
+LIVE_SQL = f"""
+    SELECT DISTINCT ON (vehicle_id)
+        vehicle_id, route_id, latitude AS lat, longitude AS lon, bearing
+    FROM vehicle_positions
+    WHERE recorded_at >= now() - interval '{RECENT_WINDOW}'
+    ORDER BY vehicle_id, recorded_at DESC
+"""
+
+
+async def broadcaster():
+    """Every BROADCAST_INTERVAL: one DB read, pushed to every connected client."""
+    while True:
+        await asyncio.sleep(BROADCAST_INTERVAL)
+        if not clients:
+            continue
+        try:
+            rows = await fetch(LIVE_SQL, ())
+        except Exception:
+            continue
+        payload = json.dumps({"type": "positions", "vehicles": rows}, default=str)
+        for ws in list(clients):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                clients.discard(ws)  # prune dead connections
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Open the DB pool + Redis client at startup, close them at shutdown."""
+    """Open the DB pool + Redis client and start the broadcaster at startup."""
     global pool, rds
     pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=5, open=False)
     await pool.open()
     rds = redis.from_url(config.REDIS_URL, decode_responses=True)
+    task = asyncio.create_task(broadcaster())
     yield
+    task.cancel()
     await rds.aclose()
     await pool.close()
 
@@ -56,6 +89,20 @@ async def health():
         await cur.execute("SELECT 1")
         await cur.fetchone()
     return {"status": "ok"}
+
+
+@app.websocket("/ws/vehicles")
+async def ws_vehicles(ws: WebSocket):
+    """Live vehicle feed: the server pushes position snapshots; clients just listen."""
+    await ws.accept()
+    clients.add(ws)
+    try:
+        while True:
+            await ws.receive_text()  # we don't expect client messages; this detects disconnect
+    except WebSocketDisconnect:
+        pass
+    finally:
+        clients.discard(ws)
 
 
 @app.get("/vehicles")
