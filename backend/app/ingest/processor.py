@@ -37,7 +37,13 @@ INSERT_SQL = """
 
 def to_row(f: dict) -> tuple:
     """Convert a stream message's fields into INSERT_SQL params."""
-    ts = datetime.fromtimestamp(int(f["ts"]), tz=timezone.utc) if f.get("ts") else None
+    # recorded_at is the hypertable time column and must be NOT NULL: if the feed
+    # omits a timestamp, fall back to ingestion time.
+    ts = (
+        datetime.fromtimestamp(int(f["ts"]), tz=timezone.utc)
+        if f.get("ts")
+        else datetime.now(timezone.utc)
+    )
     lon, lat = float(f["lon"]), float(f["lat"])
     bearing = float(f["bearing"]) if f.get("bearing") else None
     h3_cell = h3.latlng_to_cell(lat, lon, config.H3_RESOLUTION)

@@ -3,6 +3,9 @@
 -- Holds the MBTA *schedule* (the slowly-changing skeleton the live feed joins onto).
 -- Spatial indexes are intentionally deferred to Phase 2 (so we can measure the speedup).
 
+-- Enable PostGIS (the spatial extension). Required for the geometry columns below.
+CREATE EXTENSION IF NOT EXISTS postgis;
+
 -- routes: one row per transit line (subway/bus/rail).
 CREATE TABLE routes (
     route_id         TEXT PRIMARY KEY,

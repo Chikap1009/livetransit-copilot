@@ -8,16 +8,17 @@
 # safe to commit. Start with:  docker compose up -d
 services:
   postgres:
-    image: postgis/postgis:16-3.4          # Postgres 16 + PostGIS extension, prebuilt
+    # TimescaleDB-HA bundles TimescaleDB + PostGIS + pgvector (needed in Phases 5 and D).
+    image: timescale/timescaledb-ha:pg17
     container_name: lt-postgres
-    environment:                            # the official image reads these on first boot
+    environment:                            # honors the standard postgres env vars
       POSTGRES_USER: ${POSTGRES_USER}       # filled from .env
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"                         # host:container
     volumes:
-      - pgdata:/var/lib/postgresql/data     # persist DB data outside the container
+      - pgdata:/home/postgres/pgdata/data   # this image's PGDATA path
     healthcheck:                            # report "ready" only once it accepts connections
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
