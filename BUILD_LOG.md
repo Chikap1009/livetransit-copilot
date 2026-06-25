@@ -311,3 +311,51 @@ functions + indexes); corrected SRID = **Spatial Reference (System) ID** (user g
 **Phase 1** — the live poller. Goal: fetch MBTA VehiclePositions `.pb` every ~10s, decode the
 protobuf with `gtfs-realtime-bindings`, store positions, expose `GET /vehicles` + `GET /health`
 via FastAPI. Learn first: HTTP, REST, protobuf, poller-as-separate-process, GTFS-RT.
+
+---
+
+## Entry 7 — Phase 1, Sub-steps 1–2: backend skeleton + working poller
+**Date:** 2026-06-25
+**Phase:** Phase 1 (first ingestion)
+
+### Concepts taught
+- **GTFS-RT**: live feeds (VehiclePositions / TripUpdates / Alerts); we use VehiclePositions
+  `.pb` (no key). **Protobuf**: compact binary; needs schema + `gtfs-realtime-bindings` to decode.
+- **Poller vs API**: a long-lived background worker fetches the feed on a loop, separate from the
+  request-handling API (background work vs request handling).
+- **async/await**: cooperative multitasking — `await` a slow op (network/DB) without freezing the
+  thread. Analogy: an async waiter serves other tables while food cooks.
+
+### What we did
+**Sub-step 1 (skeleton):**
+- Installed backend deps (fastapi 0.138.0, uvicorn 0.49.0, httpx 0.28.1, gtfs-realtime-bindings
+  2.0.0, + protobuf, pydantic, python-dotenv). Pinned in `backend/requirements.txt`.
+- Created `backend/app/` package; `core/config.py` loads `.env` via python-dotenv and exposes
+  DATABASE_URL, REDIS_URL, MBTA_VEHICLE_POSITIONS_URL, POLL_INTERVAL_SECONDS. Added the two MBTA
+  vars to `.env` + `.env.example`.
+- Migration `0002_vehicle_positions.sql` applied: table with geom Point/4326 (no dedup/H3/index).
+
+**Sub-step 2 (poller):** `backend/app/ingest/poller.py`
+- Loop: fetch `.pb` (httpx async) -> decode (gtfs_realtime_pb2) -> `executemany` INSERT building
+  geom via `ST_SetSRID(ST_MakePoint(lon,lat),4326)` -> commit -> sleep to interval. try/except
+  around each tick so it survives feed failures. `--ticks N` for bounded test runs.
+- **Bug (Windows-specific, caught & fixed):** psycopg async cannot use Windows' default
+  ProactorEventLoop. Added a `run()` helper that uses `loop_factory=asyncio.SelectorEventLoop` on
+  win32 only (no-op on Linux/Docker). Used modern loop_factory (not deprecated
+  set_event_loop_policy).
+- Verified: `--ticks 2` stored 524 then 525 positions; DB has 1049 rows / 525 distinct vehicles
+  (duplication expected, no dedup yet); sample coords ~(42.3, -71.0) Boston; geom matches lat/lon
+  (correct order); top routes Red/Orange/Green/66/1.
+
+### How to verify
+- `.venv\Scripts\python.exe -m backend.app.ingest.poller --ticks 2` → logs "stored N positions".
+- `docker compose exec -T postgres psql -U livetransit -d livetransit -c "SELECT count(*),
+  count(DISTINCT vehicle_id) FROM vehicle_positions;"`
+
+### Recurring gotcha added
+- **Windows + psycopg async** needs SelectorEventLoop. Conditional on `sys.platform == 'win32'`.
+
+### Next step
+**Phase 1, Sub-step 3:** the API — `GET /vehicles` (latest position per vehicle) + `GET /health`
+with FastAPI; run with uvicorn. Teach: HTTP request/response, REST, FastAPI routing, async DB
+query. Then Sub-step 4: containerize poller + API as compose services.
