@@ -1,0 +1,3 @@
+# Dependencies for the static GTFS loader (db/load_static_gtfs.py).
+# Install into the project venv:  .venv\Scripts\python.exe -m pip install -r db/requirements.txt
+psycopg[binary]==3.3.4
