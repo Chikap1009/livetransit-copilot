@@ -440,3 +440,47 @@ Timescale/retention → Phase 5. The stack is currently UP and ingesting.
 Phase 1 **Concept Check** (why poller separate from API; what protobuf is & why the feed uses it;
 what `GET /vehicles` does request→response). Then **Phase 2** (Redis Stream + processor, dedup/
 idempotency, H3 tagging, GiST index + measured speedup, spatial endpoints, caching).
+
+---
+
+## Entry 10 — Phase 2, Sub-step 2a: Redis Stream pipeline + idempotency
+**Date:** 2026-06-26
+**Phase:** Phase 2 (streaming pipeline)
+
+### Phase 1 Concept Check — PASSED
+User: (1) poller normalizes load (1 fetch/10s regardless of users) ✓; (2) protobuf binary/fast/
+needs library ✓ (sharpened: general-purpose format); (3) request→response — corrected a mix-up:
+the **poller is NOT in the request path**; API reads the table (pool + DISTINCT ON latest per
+vehicle + route filter) → JSON. Locked in: "poller writes in background, API reads on demand".
+
+### Concepts taught
+- **Redis Stream** = append-only log / conveyor belt. Producer `XADD`, consumer `XREADGROUP`.
+- **Consumer group** + `XACK` = reliable sharing; **at-least-once delivery** (an item may arrive
+  more than once).
+- **Idempotency**: processing twice = no extra effect. Dedupe key `(vehicle_id, recorded_at)` via
+  UNIQUE index + `INSERT ... ON CONFLICT DO NOTHING`. Analogy: re-scanning a used ticket.
+
+### What we did
+- Migration `0003_dedupe.sql`: TRUNCATE + UNIQUE index `(vehicle_id, recorded_at) NULLS NOT
+  DISTINCT`.
+- `backend/app/core/asyncrun.py`: shared `run()` (Windows SelectorEventLoop) for both workers.
+- Refactored `poller.py`: decode -> `XADD` each vehicle to `vehicles:stream` (pipelined; maxlen
+  200k). No DB access.
+- New `processor.py`: `xgroup_create` (mkstream), loop `xreadgroup` (count 500, block 5s),
+  `executemany` INSERT ... ON CONFLICT DO NOTHING (geom via ST_MakePoint), commit, then `XACK`.
+- Added `redis==6.4.0` dep; added `processor` compose service; poller env trimmed to Redis-only.
+- **Bug (caught & fixed):** removing DATABASE_URL from poller env crashed it — `config.py` did
+  `os.environ["DATABASE_URL"]` at import. Made it `os.environ.get(...)` (optional) so a process
+  that doesn't need the DB can still import config.
+- Verified: poller "published ~760"; processor "processed 500/259"; `XPENDING` 0;
+  **duplicates = 0** (total_rows == distinct_keys) while poller keeps republishing → idempotency
+  proven. Committed `b246f81`.
+
+### How to verify
+- `docker compose logs processor -f`; `docker compose exec redis redis-cli XLEN vehicles:stream`;
+  `... XPENDING vehicles:stream writers`; and the SQL dup check (duplicates column = 0).
+
+### Next step
+**Phase 2, Sub-step 2b:** H3 hexagon tagging. Add `h3_cell` column + the `h3` lib; processor
+computes the H3 cell per position. Teach H3 (hexagonal global grid, resolutions). Then 2c (GiST
+index + EXPLAIN ANALYZE speedup), 2d (spatial endpoints + caching).
