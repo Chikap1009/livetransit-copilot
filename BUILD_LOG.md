@@ -359,3 +359,84 @@ via FastAPI. Learn first: HTTP, REST, protobuf, poller-as-separate-process, GTFS
 **Phase 1, Sub-step 3:** the API — `GET /vehicles` (latest position per vehicle) + `GET /health`
 with FastAPI; run with uvicorn. Teach: HTTP request/response, REST, FastAPI routing, async DB
 query. Then Sub-step 4: containerize poller + API as compose services.
+
+---
+
+## Entry 8 — Phase 1, Sub-step 3: FastAPI app (/health, /vehicles)
+**Date:** 2026-06-25
+**Phase:** Phase 1 (first ingestion)
+
+### Concepts taught
+- **HTTP request/response**: client sends method+path (+params), server returns status + JSON body.
+- **REST**: tidy URL conventions around resources (`GET /vehicles`, `GET /health`).
+- **FastAPI** (`@app.get(...)` turns a function into an endpoint) + **uvicorn** (the server).
+- **Connection pool** (`psycopg_pool`): reuse a few ready DB connections instead of opening one
+  per request. Opened once via FastAPI `lifespan`.
+- **`DISTINCT ON (vehicle_id) ... ORDER BY vehicle_id, recorded_at DESC`** = latest row per vehicle.
+- **Parameterized queries** (`route_id = %s`) prevent SQL injection.
+
+### What we did
+- Installed `psycopg-pool==3.3.1` (added to requirements). Created `backend/app/main.py`:
+  lifespan-managed AsyncConnectionPool, `GET /health` (SELECT 1), `GET /vehicles?route=&limit=`.
+- **Bug (Windows, round 2):** the first fix (`set_event_loop_policy` before `uvicorn.run`) FAILED —
+  uvicorn installs its own ProactorEventLoop on Windows, overriding the policy, so the pool still
+  errored (`PoolTimeout` after repeated "cannot use ProactorEventLoop"). **Robust fix:** on win32,
+  build a `SelectorEventLoop(SelectSelector())` ourselves, `set_event_loop`, and run
+  `uvicorn.Server(Config(app, loop="none"))` so uvicorn doesn't replace the loop. Linux/Docker path
+  unchanged (`uvicorn.run`). Also dropped the deprecated policy call.
+- Verified: `/health` → ok; `/vehicles?route=Red&limit=5` → 5 Red Line trains w/ Boston coords;
+  `/vehicles` → 525 distinct vehicles. Committed `f173baa`.
+
+### How to verify
+- `.venv\Scripts\python.exe -m backend.app.main` then browse `http://localhost:8000/docs`, or
+  `Invoke-RestMethod http://localhost:8000/vehicles?route=Red`.
+
+### Gotcha reinforced
+- **Windows + uvicorn + psycopg async**: must own the SelectorEventLoop and set uvicorn `loop="none"`.
+  Setting the asyncio policy alone is NOT enough (uvicorn overrides it).
+
+### Next step
+**Phase 1, Sub-step 4 (final):** containerize the poller + API as compose services (Dockerfile +
+`.dockerignore`; `api` and `poller` services that build from it, `depends_on` postgres healthy,
+with in-container DATABASE_URL pointing at host `postgres` not `localhost`). Then Phase 1 Concept
+Check.
+
+---
+
+## Entry 9 — Phase 1, Sub-step 4: containerized; PHASE 1 COMPLETE
+**Date:** 2026-06-25
+**Phase:** Phase 1 (first ingestion)
+
+### Concepts taught
+- **Dockerfile**: recipe to build our OWN image (FROM python:3.12-slim, install deps, copy code,
+  CMD). Layer caching: copy requirements before code so deps don't reinstall on code changes.
+- **.dockerignore**: keep junk/secrets (.venv, data/, .git, .env, frontend/) out of the build.
+- **Service-name networking** (key gotcha): inside compose, containers reach each other by service
+  name — DB host is `postgres`, NOT `localhost` (localhost in a container = that container).
+- **depends_on: condition: service_healthy**: api/poller wait for Postgres to pass its healthcheck.
+
+### What we did
+- `Dockerfile` (python:3.12-slim — independent of host's 3.14; guaranteed wheels).
+- `.dockerignore`.
+- Added `api` + `poller` services to `docker-compose.yml`, each `build: .`, with DATABASE_URL/
+  REDIS_URL overridden to use service-name hosts; api publishes `8000:8000`; both depend on
+  postgres healthy.
+- `docker compose build` then `docker compose up -d` → full stack (db+redis+api+poller).
+- Verified: all 4 up; poller logs "stored ~515 positions" every ~10s; `/health` ok;
+  `/vehicles?route=Orange` → 3 trains; DB newest row ~5s old (container poller actively writing).
+  Committed `7cee8be`.
+
+### How to verify
+- `docker compose up -d` then `docker compose ps` (4 services), `docker compose logs poller -f`,
+  `Invoke-RestMethod http://localhost:8000/vehicles?route=Red`.
+- Stop with `docker compose down` (keeps data) — note: the poller keeps ingesting while up, so the
+  table grows (bounded later in Phase 5 via Timescale retention).
+
+### Phase 1 status: ✅ COMPLETE (pending Concept Check).
+Known/deferred: duplicate rows each tick (no dedup) → Phase 2; no spatial index → Phase 2; no
+Timescale/retention → Phase 5. The stack is currently UP and ingesting.
+
+### Next step
+Phase 1 **Concept Check** (why poller separate from API; what protobuf is & why the feed uses it;
+what `GET /vehicles` does request→response). Then **Phase 2** (Redis Stream + processor, dedup/
+idempotency, H3 tagging, GiST index + measured speedup, spatial endpoints, caching).
