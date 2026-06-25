@@ -685,3 +685,72 @@ WebSocket dots. Services: postgres, redis, api, poller, processor, tiles.
 Phase 4 **Concept Check** (why not send whole-city geometry; what a vector tile is + what the tile
 server does; 4326 vs 3857). Then **Phase 5** (TimescaleDB hypertable + retention + R2 offload +
 continuous aggregate + derive arrival labels for ML).
+
+---
+
+## Entry 18 — Phase 4 Concept Check + Phase 5a: TimescaleDB hypertable
+**Date:** 2026-06-26
+**Phase:** Phase 4 → 5 boundary
+
+### Phase 4 Concept Check — PASSED
+Tiles: whole-city geometry too slow/big; tiles = z/x/y boxes, browser fetches only visible ✓.
+Tile server corrected: Martin QUERIES PostGIS for geometry in a tile, CLIPS it, ENCODES MVT,
+returns bytes — generated on demand (not pre-rendered); port/CORS are just plumbing. 4326=GPS
+(our DB), 3857=web tiles, Martin reprojects ✓.
+
+### Concept taught (Phase 5)
+- **Time-series + hypertable**: TimescaleDB auto-partitions a table by time into chunks ("page per
+  day"). Time-scoped queries/cleanup touch only relevant chunks; unlocks retention + continuous
+  aggregates. Hypertable rules: time column NOT NULL; unique indexes must include it.
+
+### What we did (5a)
+- **DB image switch**: `postgis/postgis:16-3.4` → `timescale/timescaledb-ha:pg17` (bundles
+  TimescaleDB + PostGIS + pgvector). New PGDATA path `/home/postgres/pgdata/data`. Destructive:
+  `docker compose down -v` wiped volumes (lost throwaway history; static GTFS reloaded).
+- Migration `0001` now explicitly `CREATE EXTENSION IF NOT EXISTS postgis` (HA image doesn't
+  auto-create it). New `0007_timescale.sql`: recorded_at NOT NULL, drop surrogate id PK,
+  `create_hypertable('vehicle_positions','recorded_at')`.
+- Processor: `recorded_at` falls back to ingestion time when feed omits ts (NOT NULL).
+- Re-ran migrations 0001–0007; reloaded GTFS (403/10308/121935/3.34M/1150); rebuilt + up all 6
+  services. Verified: hypertable present (1 dim), data flowing (1156 rows, 1 chunk), API healthy.
+  Committed `c92776d`.
+
+### Next step
+**Phase 5, Sub-step 5b:** retention policy (auto-drop raw rows older than ~72h) + a continuous
+aggregate (per-route hourly travel-time rollup). Teach retention + continuous aggregates. Then 5c
+(arrival labels + Parquet offload).
+
+---
+
+## Entry 19 — Phase 5, Sub-steps 5b–5c: retention, aggregate, arrival labels; PHASE 5 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 5 (time-series & history)
+
+### Concepts taught
+- **Retention policy**: background job dropping whole time-chunks older than a cutoff (near-instant
+  vs row deletes); bounds storage.
+- **Continuous aggregate**: incrementally-maintained materialized view of rollups; survives
+  retention (keep rollups, drop raw). (No count(DISTINCT) allowed inside.)
+- **Arrival labels**: detect arrival by NEAREST APPROACH (closest position within 75 m of a stop);
+  delay = actual arrived_at − scheduled_ts (GTFS local arrival_time placed on the service date in
+  America/New_York, made absolute).
+
+### What we did
+- **5b**: Migration `0008` — `add_retention_policy('vehicle_positions', 72h)` + continuous
+  aggregate `route_activity_hourly` (per-route hourly position_reports + avg_bearing) with a
+  refresh policy. Verified jobs registered; manual refresh shows data (route 66 = 318/hr).
+  Committed `2509205`.
+- **5c**: Migration `0009` — `vehicle_arrivals` table. `db/derive_arrivals.sql` — upsert via
+  DISTINCT ON (trip,stop) closest approach within 75 m, ON CONFLICT DO NOTHING. Ran it: **4,371
+  arrivals**, avg dist 22 m, realistic delays (early/late, avg ~242 s). Committed `a548f7b`.
+- **Deferred**: R2 Parquet offload → Phase J (needs Cloudflare creds; retention already bounds
+  local storage). Noted, not skipped.
+
+### Phase 5 status: ✅ COMPLETE (pending Concept Check).
+vehicle_positions = hypertable w/ 72h retention; route_activity_hourly continuous aggregate;
+vehicle_arrivals = ML labels (re-run db/derive_arrivals.sql periodically as history grows).
+
+### Next step
+Phase 5 **Concept Check** (hypertable + why partition by time; retention + where offload goes;
+positions→arrival labels). Then **Phase 6** (LightGBM ETA predictor: features → baselines → train
+time-split → MAE vs baseline → serve via GET /stops/{id}/arrivals).
