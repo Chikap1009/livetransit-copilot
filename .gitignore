@@ -21,10 +21,11 @@ venv/
 .ruff_cache/
 
 # --- GTFS / real-time data dumps (large, regenerable) ---
-*.pb                   # decoded/raw GTFS-realtime protobuf dumps
-*.zip                  # static GTFS zips
-*.parquet              # history offloads
-data/                  # any local data dump folder
+# (comments on their own lines — an inline '#' becomes part of the pattern)
+*.pb
+*.zip
+*.parquet
+data/
 
 # --- ML model artifacts (large binaries -> belong in R2, not git) ---
 *.lgb
