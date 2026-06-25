@@ -39,6 +39,36 @@ services:
       retries: 10
     restart: unless-stopped
 
+  api:
+    build: .
+    container_name: lt-api
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      # NOTE: host is "postgres"/"redis" (service names), not localhost —
+      # containers reach each other by service name on the compose network.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  poller:
+    build: .
+    container_name: lt-poller
+    command: python -m backend.app.ingest.poller
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      MBTA_VEHICLE_POSITIONS_URL: https://cdn.mbta.com/realtime/VehiclePositions.pb
+      POLL_INTERVAL_SECONDS: "10"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:                                    # named volumes managed by Docker
   pgdata:
   redisdata:
