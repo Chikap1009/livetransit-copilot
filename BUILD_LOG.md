@@ -509,3 +509,59 @@ index + EXPLAIN ANALYZE speedup), 2d (spatial endpoints + caching).
 scan, GiST/R-tree). Measure a "within 500 m" query with `EXPLAIN ANALYZE` BEFORE, add GiST index
 on geom + B-tree on h3_cell (migration 0005), measure AFTER, record the plan change + timing for
 METRICS/résumé. Then 2d (spatial endpoints + caching).
+
+---
+
+## Entry 12 — Phase 2, Sub-step 2c: GiST index + measured speedup
+**Date:** 2026-06-26
+**Phase:** Phase 2 (streaming pipeline)
+
+### Concept taught
+- **Index** = side structure to skip scanning every row (textbook back-index analogy). **Seq Scan**
+  (check every row) vs **Index Scan** (jump to candidates). **GiST/R-tree** for geometry (bounding
+  boxes skip whole regions); **B-tree** for h3_cell equality.
+- **EXPLAIN ANALYZE** = show the query plan + actual timing.
+
+### What we did (measured)
+- BEFORE (no index): `ST_DWithin(geom, point, 0.006)` over ~40,336 rows → **Seq Scan**, ~89 ms warm
+  (203 ms cold), 825 matches.
+- Migration `0005_indexes.sql`: GiST on `geom` + B-tree on `h3_cell`.
+- AFTER: same query → **Bitmap Index Scan** on `vehicle_positions_geom_gist`, **~1.4 ms** warm
+  (~1.9 ms cold). **≈ 60× faster**; gap widens as table grows.
+- Bonus: `WHERE h3_cell = ...` → Index Only Scan, ~0.24 ms.
+- Recorded in **METRICS.md**. Committed `18d2133`.
+- Note on index-usability: used degree-based `ST_DWithin(geom, point, 0.006°)` (≈500 m at Boston
+  lat) so the GEOMETRY GiST index is usable; the `::geography` meters form cannot use it.
+
+### Next step
+**Phase 2, Sub-step 2d (final):** spatial API endpoints + caching. Add `GET /vehicles/near`
+(ST_DWithin) and `GET /vehicles/cell/{h3}`; add short-TTL Redis caching to a hot endpoint. Teach
+caching/TTL/staleness. Then Phase 2 Concept Check.
+
+---
+
+## Entry 13 — Phase 2, Sub-step 2d: spatial endpoints + caching; PHASE 2 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 2 (streaming pipeline)
+
+### Concept taught
+- **Cache + TTL**: store expensive results; serve repeats from memory. TTL = expiry = the
+  staleness dial. For live data, a few seconds absorbs bursts without showing stale positions.
+
+### What we did
+- `main.py`: added a Redis client (in lifespan) + `cached_json(key, ttl, compute)` helper.
+- `GET /vehicles/near?lat&lon&radius_m=500`: `ST_DWithin(geom, point, radius_m/111320°)` (uses the
+  geometry GiST index; metres→degrees approx noted) + `recorded_at >= now() - 90s` recency filter +
+  DISTINCT ON latest. **Cached 5s**.
+- `GET /vehicles/cell/{h3}`: `WHERE h3_cell = %s` (B-tree) + recency + DISTINCT ON.
+- Verified: near downtown → 21 vehicles; Redis key TTL=5 (caching proven); 2nd call same;
+  `/vehicles/cell/882a307519fffff` → 1. Committed `13d7dd8`.
+
+### Phase 2 status: ✅ COMPLETE (pending Concept Check).
+Pipeline: poller → Redis Stream → processor (idempotent, H3-tagged) → PostGIS (GiST + h3 indexes) →
+API (/vehicles, /vehicles/near cached, /vehicles/cell). Stack runs via `docker compose up` (5
+services: postgres, redis, api, poller, processor).
+
+### Next step
+Phase 2 **Concept Check** (stream vs direct writes; idempotency + dedupe key; GiST + EXPLAIN
+ANALYZE result; why hexagons). Then **Phase 3** (WebSockets + live map with fan-out).
