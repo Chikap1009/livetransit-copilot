@@ -754,3 +754,35 @@ vehicle_arrivals = ML labels (re-run db/derive_arrivals.sql periodically as hist
 Phase 5 **Concept Check** (hypertable + why partition by time; retention + where offload goes;
 positions→arrival labels). Then **Phase 6** (LightGBM ETA predictor: features → baselines → train
 time-split → MAE vs baseline → serve via GET /stops/{id}/arrivals).
+
+---
+
+## Entry 20 — Phase 5 Concept Check + autonomous data collection (COLLECTING)
+**Date:** 2026-06-26
+**Phase:** Phase 5 → 6 boundary (data-collection pause)
+
+### Phase 5 Concept Check — PASSED
+Hypertable=time-chunked table; corrected the WHY: partition by time because queries/cleanups are
+time-scoped → DB skips irrelevant chunks (not "snapshots") ✓. Retention drops >72h (near-instant =
+drops whole chunks); continuous aggregate keeps rollups as raw is deleted ✓. Arrival = within ~75 m
+nearest approach, delay = actual vs scheduled stop_times ✓.
+
+### Decision: COLLECT FIRST (then build Phase 6)
+User chose to accumulate richer history before training. Set up **autonomous collection**:
+- Migration `0010_arrival_job.sql`: added `service_date` to `vehicle_arrivals` (multi-day safe;
+  PK now (trip_id, stop_id, service_date)); moved derivation into a `derive_arrivals()` PROCEDURE;
+  registered a **TimescaleDB scheduled job running every 10 min**. `db/derive_arrivals.sql` now
+  just `CALL derive_arrivals();`.
+- Verified: job registered (10-min interval); manual CALL grew arrivals 4,371 → 7,869.
+- Committed `8a1fa80`.
+
+### >>> CURRENT STATE: stack left RUNNING to collect data <<<
+- `docker compose` stack up (postgres+redis+api+poller+processor+tiles). Positions ingest
+  continuously; arrivals auto-derive every 10 min; 72h retention bounds storage.
+- Laptop + Docker must stay running to collect. (restart:unless-stopped resumes after a Docker
+  restart.) To pause: `docker compose stop poller processor`. To check progress:
+  `docker compose exec -T postgres psql -U livetransit -d livetransit -c "SELECT count(*),
+  count(DISTINCT service_date) FROM vehicle_arrivals;"`
+- **RESUME POINT:** when user returns, START **Phase 6** (LightGBM ETA predictor): features →
+  baselines (schedule + historical avg) → time-split train → MAE vs baseline → serve
+  `GET /stops/{id}/arrivals` → frontend accuracy panel.
