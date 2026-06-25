@@ -624,3 +624,64 @@ version. Phase 4 adds the real route/stop network as vector tiles under the dots
 Phase 3 **Concept Check** (WS vs HTTP; fan-out & why it scales; path from "new position processed"
 to "dot moves"). Then **Phase 4** (vector tiles: Martin/pg_tileserv serving routes+stops from
 PostGIS, rendered under the live dots).
+
+---
+
+## Entry 16 — Phase 4, Sub-step 4a: Martin tile server + route_shapes view
+**Date:** 2026-06-26
+**Phase:** Phase 4 (vector tiles)
+
+### Phase 3 Concept Check — PASSED
+WS=persistent push vs HTTP one-shot ✓; fan-out scales because upstream work (1 poll + 1 DB read/2s)
+stays constant as viewers grow — only cheap per-socket sends increase ✓; path: poller→stream→
+processor→DB, then broadcaster (every 2s) 1 read→WS push→browser setData→MapLibre redraws ✓.
+Write side and push side decoupled, meet only at the DB.
+
+### Concept taught
+- **Vector tiles / MVT**: world sliced into z/x/y squares; browser fetches only on-screen tiles;
+  MVT = compact protobuf geometry (data, not images → styled live, crisp at any zoom).
+- **Tile server (Martin)**: generates MVT from PostGIS per requested tile (clips + reprojects
+  4326→3857 automatically).
+
+### What we did
+- Migration `0006_route_shapes.sql`: VIEW joining shapes→trips→routes, exposing geom +
+  `'#'||route_color` (grey fallback). 1,150 colored shapes.
+- Added `tiles` (Martin, `ghcr.io/maplibre/martin`) compose service on :3000, DATABASE_URL at
+  host `postgres`. Auto-discovers tables/views with geometry.
+- Verified: `/catalog` lists `route_shapes` + `stops`; tiles `route_shapes/11/619/757` (287 KB) and
+  `stops/11/619/757` (344 KB) return 200 MVT. (Tiles hefty at z11 → show stops only at higher zoom
+  in 4b.) Committed `5c4c18e`.
+
+### Next step
+**Phase 4, Sub-step 4b:** add tile layers to the map (route lines colored by route_color under the
+dots; stops as circles, zoom-gated) + stop click popup. Visual verification. Then Phase 4 Concept
+Check.
+
+---
+
+## Entry 17 — Phase 4, Sub-step 4b: render network tiles; PHASE 4 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 4 (vector tiles)
+
+### What we did
+- Verified Martin CORS: with an `Origin` header it returns `access-control-allow-origin:
+  http://localhost:8000` — works out of the box (no config). (Plain request omits Origin → no ACAO,
+  which is normal.)
+- `frontend/index.html`: added vector source `routes` (`/route_shapes`) as a `line` layer colored
+  by `['get','route_color']`; vector source `stops` as a `circle` layer with `minzoom: 13`
+  (zoom-gated) + stop click popup (stop_name). Vehicles layer added LAST so dots stay on top.
+- Served via the existing `./frontend` volume (no rebuild).
+- **User verified in browser:** colored route lines under the dots; stops appear when zoomed in;
+  stop popups work.
+- **Q&A:** user noticed the Blue Line crossing water — confirmed REAL (harbor tunnel + coastal
+  route to Revere); not a coord bug (a lon/lat swap would put ALL lines in the ocean). Basemap is
+  coarse demotiles. Committed `b22ca3b`.
+
+### Phase 4 status: ✅ COMPLETE (pending Concept Check).
+Map now shows the real MBTA network (routes + stops as vector tiles from Martin) under live
+WebSocket dots. Services: postgres, redis, api, poller, processor, tiles.
+
+### Next step
+Phase 4 **Concept Check** (why not send whole-city geometry; what a vector tile is + what the tile
+server does; 4326 vs 3857). Then **Phase 5** (TimescaleDB hypertable + retention + R2 offload +
+continuous aggregate + derive arrival labels for ML).
