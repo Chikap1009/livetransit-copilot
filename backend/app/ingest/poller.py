@@ -14,8 +14,9 @@ import time
 import httpx
 import redis.asyncio as redis
 from google.transit import gtfs_realtime_pb2
+from prometheus_client import start_http_server
 
-from backend.app.core import config
+from backend.app.core import config, metrics
 from backend.app.core.asyncrun import run
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -54,6 +55,9 @@ async def poll_once(client: httpx.AsyncClient, r: redis.Redis) -> int:
     resp = await client.get(config.MBTA_VEHICLE_POSITIONS_URL, timeout=15)
     resp.raise_for_status()
     rows = parse_feed(resp.content)
+    ts_values = [int(f["ts"]) for f in rows if f["ts"]]
+    if ts_values:
+        metrics.FEED_TS.set(max(ts_values))   # newest vehicle timestamp -> feed freshness
     # Pipeline the XADDs into a single round-trip.
     async with r.pipeline(transaction=False) as pipe:
         for fields in rows:
@@ -64,16 +68,21 @@ async def poll_once(client: httpx.AsyncClient, r: redis.Redis) -> int:
 
 async def main(max_ticks: int = 0) -> None:
     log.info("poller starting; interval=%ss stream=%s", config.POLL_INTERVAL_SECONDS, STREAM)
+    if not max_ticks:
+        start_http_server(metrics.METRICS_PORT_POLLER)  # expose /metrics for Prometheus
     r = redis.from_url(config.REDIS_URL)
     try:
         async with httpx.AsyncClient() as client:
             tick = 0
             while True:
                 start = time.monotonic()
+                metrics.POLLS.inc()
                 try:
                     n = await poll_once(client, r)
+                    metrics.POSITIONS_PUBLISHED.inc(n)
                     log.info("published %d vehicle positions", n)
                 except Exception as exc:              # survive any failure
+                    metrics.POLL_FAILURES.inc()
                     log.warning("poll failed: %s", exc)
                 tick += 1
                 if max_ticks and tick >= max_ticks:

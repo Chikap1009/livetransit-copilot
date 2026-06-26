@@ -2,16 +2,18 @@
 import asyncio
 import json
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import redis.asyncio as redis
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from backend.app.core import config
+from backend.app.core import config, metrics
 from backend.app.ml import predictor
 
 # How recent a position must be to count as a vehicle's "current" location.
@@ -76,6 +78,23 @@ app = FastAPI(title="LiveTransit API", lifespan=lifespan)
 app.mount("/web", StaticFiles(directory="frontend", html=True), name="web")
 
 
+@app.middleware("http")
+async def track_latency(request: Request, call_next):
+    """Record request latency, labeled by the ROUTE TEMPLATE (low cardinality)."""
+    start = time.perf_counter()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    label = getattr(route, "path", "unmatched")  # e.g. /stops/{stop_id}/arrivals, not the real id
+    metrics.REQ_LATENCY.labels(request.method, label).observe(time.perf_counter() - start)
+    return response
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus scrape endpoint."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 async def cached_json(key: str, ttl: int, compute):
     """Return cached JSON for `key`, or run `compute()`, cache it (EX=ttl), return it."""
     hit = await rds.get(key)
@@ -106,6 +125,7 @@ async def ws_vehicles(ws: WebSocket):
     """Live vehicle feed: the server pushes position snapshots; clients just listen."""
     await ws.accept()
     clients.add(ws)
+    metrics.WS_CLIENTS.set(len(clients))
     try:
         while True:
             await ws.receive_text()  # we don't expect client messages; this detects disconnect
@@ -113,6 +133,7 @@ async def ws_vehicles(ws: WebSocket):
         pass
     finally:
         clients.discard(ws)
+        metrics.WS_CLIENTS.set(len(clients))
 
 
 @app.get("/vehicles")

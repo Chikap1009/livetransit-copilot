@@ -13,9 +13,10 @@ from datetime import datetime, timezone
 import h3
 import psycopg
 import redis.asyncio as redis
+from prometheus_client import start_http_server
 from redis.exceptions import ResponseError
 
-from backend.app.core import config
+from backend.app.core import config, metrics
 from backend.app.core.asyncrun import run
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -65,6 +66,8 @@ async def ensure_group(r: redis.Redis) -> None:
 
 async def main(max_ticks: int = 0) -> None:
     log.info("processor starting; group=%s consumer=%s", GROUP, CONSUMER)
+    if not max_ticks:
+        start_http_server(metrics.METRICS_PORT_PROCESSOR)  # expose /metrics for Prometheus
     r = redis.from_url(config.REDIS_URL, decode_responses=True)
     await ensure_group(r)
     try:
@@ -83,6 +86,8 @@ async def main(max_ticks: int = 0) -> None:
                     await cur.executemany(INSERT_SQL, rows)
                 await conn.commit()
                 await r.xack(STREAM, GROUP, *ids)          # only ack after a durable write
+                metrics.MESSAGES.inc(len(ids))
+                metrics.BATCHES.inc()
                 log.info("processed %d messages", len(ids))
                 tick += 1
                 if max_ticks and tick >= max_ticks:
