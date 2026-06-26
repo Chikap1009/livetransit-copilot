@@ -947,3 +947,41 @@ hide bad outliers that real users feel.
 Phase 8 **Concept Check** (unit vs integration vs e2e; what's most worth testing here; why fixtures
 over live feed). Then **Phase 9** (GitHub Actions CI: lint + pytest w/ Postgres service container +
 build image). Retrain model tomorrow w/ full-day data (see memory).
+
+---
+
+## Entry 26 — Phase 8 Concept Check + Phase 9: CI green; BODY (0–9) COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 8 → 9
+
+### Phase 8 Concept Check — PASSED
+Corrected unit/integration framing: it's ISOLATION (unit=isolated logic no deps; integration=real
+components together e.g. real Postgres; e2e=whole flow), not "row vs table"; got 3+3 split right.
+What-to-test ✓. Fixtures: added the determinism/no-network reason for the synthetic feed.
+
+### Concept taught (Phase 9)
+- CI (run checks on every push) / CD (auto-deploy on pass). GitHub Actions = workflows/jobs/steps.
+  **Service container** = a real Postgres spun up inside the workflow for integration tests.
+
+### What we did
+- `ruff` linter + `ruff.toml` (E,F,I,W; line-length 100). Fixed 2 E501s. `ruff==0.15.20` pinned in
+  requirements-dev.
+- `.github/workflows/ci.yml`: `test` job (postgis service container, DATABASE_URL env, install
+  reqs, ruff check, pytest) + `build` job (docker build).
+- **Bug (green locally / red in CI):** CI runs bare `pytest` which (unlike `python -m pytest`)
+  doesn't put repo root on sys.path → `ModuleNotFoundError: backend`. Reproduced locally with bare
+  pytest; fixed with `pythonpath = .` in pytest.ini.
+- Verified via GitHub API polling: first run FAILED (test), build passed; after fix run **SUCCESS**.
+  Commits `779c341`, `8acfec2`.
+- Optional (user, in repo settings): enable branch protection so main requires green CI.
+
+### >>> BODY COMPLETE: Phases 0–9 done. <<<
+Live transit system: ingest→stream→process→PostGIS/Timescale→API/WS→map+tiles, ML ETA predictor,
+observability (Prometheus/Grafana), tests, green CI. 8 docker services. Repo:
+https://github.com/Chikap1009/livetransit-copilot
+
+### Next step
+Phase 9 **Concept Check** (CI vs CD; workflow stages; why CI needs its own DB service). Then the
+**BRAIN** — **Phase A** (first Pydantic AI agent: 3 read-only tools + Gemini gateway + ReAct loop +
+POST /agent/ask). NOTE: needs a Google AI Studio (Gemini) API key from the user. Also: retrain ETA
+model tomorrow w/ full-day data (memory `retrain-eta-model-full-day`).
