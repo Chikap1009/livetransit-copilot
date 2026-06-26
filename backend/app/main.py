@@ -14,6 +14,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
+from pydantic_ai.messages import ToolCallPart
 
 from backend.app.agent.copilot import Deps, copilot
 from backend.app.agent.gateway import USAGE_LIMITS
@@ -111,8 +112,8 @@ async def agent_ask(req: AskRequest):
         part.tool_name
         for msg in result.all_messages()
         for part in getattr(msg, "parts", [])
-        # exclude Pydantic AI's internal "final_result_*" output tool
-        if part.__class__.__name__ == "ToolCallPart" and not part.tool_name.startswith("final_result")
+        # only tool *calls*, excluding Pydantic AI's internal "final_result_*" output tool
+        if isinstance(part, ToolCallPart) and not part.tool_name.startswith("final_result")
     ]
     return {
         "answer_type": type(result.output).__name__,
