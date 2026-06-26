@@ -7,7 +7,6 @@ from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.usage import UsageLimits
 
-
 # Error fragments that should trigger a fallback (rate limits, plus Groq's flaky
 # streaming tool-call error which is transient and usually succeeds on retry).
 _FALLBACK_MARKERS = (
