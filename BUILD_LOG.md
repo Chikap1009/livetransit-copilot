@@ -985,3 +985,40 @@ Phase 9 **Concept Check** (CI vs CD; workflow stages; why CI needs its own DB se
 **BRAIN** — **Phase A** (first Pydantic AI agent: 3 read-only tools + Gemini gateway + ReAct loop +
 POST /agent/ask). NOTE: needs a Google AI Studio (Gemini) API key from the user. Also: retrain ETA
 model tomorrow w/ full-day data (memory `retrain-eta-model-full-day`).
+
+---
+
+## Entry 27 — Phase 9 Concept Check + Phase A: first agent WORKS
+**Date:** 2026-06-26
+**Phase:** Phase 9 → A (BODY → BRAIN)
+
+### Phase 9 Concept Check — PASSED
+CI=auto checks on push (built it) / CD=auto deploy on green (Phase J) ✓; corrected: ruff & pytest
+are separate steps (checkout→setup→install→ruff→pytest w/ PG service; build job=docker build);
+corrected #3: CI needs its own DB because the runner has NONE + isolation + reproducibility (NOT
+"scale/production").
+
+### Concepts taught (Phase A)
+- program vs chatbot vs agent; ReAct loop (reason→act→observe); tool/function calling (model
+  REQUESTS, your code RUNS); Pydantic AI ("FastAPI for agents", one-string provider switch); hosted
+  LLM + free tiers.
+
+### What we did
+- **Gemini key**: user pasted (format `AQ.Ab8...` — newer style, valid). Stored in git-ignored
+  `.env` (GEMINI_API_KEY); placeholder in `.env.example`; passed to api container via compose
+  `${GEMINI_API_KEY}`. Flagged: regenerate if worried (shared in chat).
+- Installed `pydantic-ai-slim[google]==2.0.0`. **Gotcha:** v2 provider rename — `google-gla` →
+  use **`google:gemini-2.5-flash`**. Smoke test → "pong".
+- `agent/gateway.py` (MODEL + UsageLimits(request_limit=8)), `agent/tools.py`
+  (get_vehicle_positions [DB], predict_eta [DB+LightGBM], get_service_alerts [live Alerts.pb]),
+  `agent/copilot.py` (Agent + deps=pool + system prompt + 3 @copilot.tool), `POST /agent/ask`
+  (returns answer + tools_used).
+- Verified: "Red Line trains?" → get_vehicle_positions → "18 trains" + coords; "Orange alerts?" →
+  get_service_alerts → 5 real alerts. Ruff clean. Committed `527e0ba`.
+
+### Phase A status: ✅ COMPLETE (pending Concept Check).
+
+### Next step
+Phase A **Concept Check** (draw ReAct loop; what a tool is + function calling; question→answer
+flow; why hosted LLM). Then **Phase B** (structured outputs + streaming reasoning). Retrain ETA
+model tomorrow (memory).
