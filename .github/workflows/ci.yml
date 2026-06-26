@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:                         # a real PostGIS DB for the integration tests
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: livetransit
+          POSTGRES_PASSWORD: testpw
+          POSTGRES_DB: livetransit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U livetransit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://livetransit:testpw@localhost:5432/livetransit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Run tests
+        run: pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t livetransit:ci .

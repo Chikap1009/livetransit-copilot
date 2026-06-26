@@ -3,8 +3,8 @@
 Phase 2: reads the Redis Stream via a consumer group (at-least-once delivery),
 inserts idempotently (ON CONFLICT DO NOTHING on the dedupe key), then XACKs.
 Run:
-    .venv\\Scripts\\python.exe -m backend.app.ingest.processor            # forever
-    .venv\\Scripts\\python.exe -m backend.app.ingest.processor --ticks 3  # test: 3 batches then exit
+    .venv\\Scripts\\python.exe -m backend.app.ingest.processor             # forever
+    .venv\\Scripts\\python.exe -m backend.app.ingest.processor --ticks 3   # 3 batches then exit
 """
 import argparse
 import logging

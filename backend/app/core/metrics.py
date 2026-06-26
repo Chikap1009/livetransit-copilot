@@ -8,7 +8,7 @@ from prometheus_client import Counter, Gauge, Histogram
 # --- Poller ---
 POLLS = Counter("lt_poller_polls_total", "Feed polls attempted")
 POLL_FAILURES = Counter("lt_poller_poll_failures_total", "Feed polls that failed")
-POSITIONS_PUBLISHED = Counter("lt_poller_positions_published_total", "Positions published to stream")
+POSITIONS_PUBLISHED = Counter("lt_poller_positions_published_total", "Positions published")
 FEED_TS = Gauge("lt_poller_last_feed_timestamp_seconds", "Unix ts of newest vehicle in last poll")
 
 # --- Processor ---
