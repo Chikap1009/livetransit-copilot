@@ -1057,3 +1057,52 @@ data entering at tool execution ✓; hosted = VRAM + server-reachable ✓.
 Phase B **Concept Check** (why structured outputs + malformed handling; what's streamed + why the
 tool-step trace matters). Then **Phase C** (Next.js + CopilotKit + map fusion — agent draws on the
 map). Retrain ETA model tomorrow (memory `retrain-eta-model-full-day`).
+
+---
+
+## Entry 29 — Phase C: Next.js + CopilotKit + map fusion (C1, C2 done; C3 mostly done)
+**Date:** 2026-06-27
+**Phase:** Phase C (real frontend)
+
+### Phase B Concept Check — PASSED (structured outputs = fillable form, validated, auto-retry;
+streamed tool steps = transparency/trust, avoids "frozen" feel).
+
+### C1 — Next.js app + live map
+- Scaffolded `web/` (Next.js **16**, App Router, TS). web/AGENTS.md warns Next is newer than
+  training -> read `web/node_modules/next/dist/docs/...` first ('use client' + useEffect confirmed).
+- `web/app/components/LiveMap.tsx` (MapLibre + WS dots + Martin tiles + status overlay + vehicle
+  popup), `StopPanel.tsx` (polished React prediction panel). Dev: `npm --prefix web run dev --
+  --port 3002`. API CORS enabled (`allow_origins=*`; tighten Phase J). Old `/web` kept as legacy.
+
+### C2 — CopilotKit chat -> Python agent (AG-UI)
+- Backend `POST /agent/ag-ui` via `pydantic_ai.ui.ag_ui.AGUIAdapter.dispatch_request(..., output_type
+  =str)` (v2 moved AG-UI; read source to find it). Installed `pydantic-ai-slim[google,ag-ui,groq]`.
+- Frontend: `@copilotkit/*` 1.61 + `@ag-ui/client`. `app/api/copilotkit/route.ts` (CopilotRuntime +
+  HttpAgent -> :8000/agent/ag-ui + EmptyAdapter). `AppShell.tsx` (provider + CopilotSidebar).
+  `CopilotActions.tsx` = catch-all `useCopilotAction({name:'*'})` -> clean tool-call pills.
+- **Groq fallback (Phase H early)**: `FallbackModel(gemini, groq×4, fallback_on=_should_fallback)`.
+  Gemini free tier ~20/window. Bugs fixed: (1) streaming raised raw google ClientError 429 (not
+  ModelAPIError) -> fallback never fired; fixed with message-matching fallback_on. (2) Groq streaming
+  tool-calls flaky (~2/3 "Failed to call a function") -> list Groq ×4 to retry. Chat (text path)
+  works on Groq; structured /agent/ask weak on Groq (known).
+- Bug: `predict_eta` returned STALE past arrivals -> `HAVING max(arrived_at)>=now()-30min` +
+  `scheduled_ts>=now()-2min` (in tool + /stops endpoint).
+
+### C3 — map fusion
+- `LiveMap` `useCopilotAction` handlers (mapRef): **highlightRoute** (dim others + neon cyan + dark
+  casing), **dropPin**, **clearMap**. System prompt says agent can draw. Highlight VERIFIED by user.
+- REMAINING (C3 finale): trip planning "A->B + ETA". Plan: lightweight GTFS direct-trip `plan_trip`
+  tool (match stop names -> direct route -> times/ETA -> draw segment). OTP = stretch (heavy).
+
+### >>> DISK CRISIS (resolved) <<<
+Docker crashed: C: hit 0.3 GB free (475 GB). ~20 rebuilds -> 30 GB unused images + 22 GB build cache.
+`docker system prune -af` (NO --volumes; data safe) reclaimed 26 GB; C: -> 3.7 GB; api rebuilt.
+GOING FORWARD: run `docker system prune -af` after heavy build sessions.
+
+### >>> PAUSE POINT — stack RUNNING to collect data <<<
+- 8 services up + Next.js dev :3002. Frontend: http://localhost:3002 (CopilotKit) / :8000/web (legacy).
+- TODO on resume: (1) **Retrain ETA model** (`python -m backend.app.ml.train` + `docker compose
+  restart api`; memory `retrain-eta-model-full-day`). (2) **Agent eval pass** (memory
+  `agent-eval-pass`). (3) **C3 finale** lightweight `plan_trip`. (4) Then Phases D,E,F,G,H,I,J.
+- Phase C commits (all pushed): 860bb42, 300c129, af61cd2, 67a306f, 3f02536, 9d1bd1e, 253b771,
+  f53b53c, a4e8cd6, + fallback 0e03807/2fd4f69/2393901.
