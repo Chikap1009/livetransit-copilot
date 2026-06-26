@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -18,6 +18,8 @@ const SUBWAY_COLORS: maplibregl.ExpressionSpecification = [
 
 export default function LiveMap() {
   const container = useRef<HTMLDivElement>(null);
+  const [connected, setConnected] = useState(false);
+  const [count, setCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!container.current) return;
@@ -57,8 +59,11 @@ export default function LiveMap() {
       });
 
       ws = new WebSocket(WS_URL);
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => setConnected(false);
       ws.onmessage = (e) => {
         const { vehicles } = JSON.parse(e.data);
+        setCount(vehicles.length);
         const src = map.getSource('vehicles') as maplibregl.GeoJSONSource | undefined;
         src?.setData({
           type: 'FeatureCollection',
@@ -77,5 +82,19 @@ export default function LiveMap() {
     };
   }, []);
 
-  return <div ref={container} style={{ position: 'absolute', inset: 0 }} />;
+  return (
+    <>
+      <div
+        style={{
+          position: 'absolute', top: 10, left: 10, zIndex: 1,
+          background: 'rgba(0,0,0,0.75)', color: '#fff', padding: '8px 12px',
+          borderRadius: 6, font: '14px system-ui, sans-serif',
+        }}
+      >
+        <span style={{ color: connected ? '#3f3' : '#f33' }}>●</span>{' '}
+        {connected ? `live — ${count ?? 0} vehicles` : 'connecting…'}
+      </div>
+      <div ref={container} style={{ position: 'absolute', inset: 0 }} />
+    </>
+  );
 }
