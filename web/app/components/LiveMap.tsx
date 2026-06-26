@@ -4,17 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-const TILES = 'http://localhost:3000';            // Martin tile server
-const API = 'http://localhost:8000';              // FastAPI
-const WS_URL = 'ws://localhost:8000/ws/vehicles'; // live vehicle feed
+import StopPanel from './StopPanel';
 
-function delayLabel(d: number | null): string {
-  if (d == null) return '?';
-  const m = Math.max(1, Math.round(Math.abs(d) / 60));
-  if (d > 30) return `${m}m late`;
-  if (d < -30) return `${m}m early`;
-  return 'on time';
-}
+const TILES = 'http://localhost:3000';            // Martin tile server
+const WS_URL = 'ws://localhost:8000/ws/vehicles'; // live vehicle feed
 
 const SUBWAY_COLORS: maplibregl.ExpressionSpecification = [
   'match', ['get', 'route_id'],
@@ -29,6 +22,7 @@ export default function LiveMap() {
   const container = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const [count, setCount] = useState<number | null>(null);
+  const [selectedStop, setSelectedStop] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!container.current) return;
@@ -67,34 +61,23 @@ export default function LiveMap() {
         },
       });
 
-      // Click a vehicle dot -> popup with route + id.
+      // Click a vehicle dot -> small readable popup (inline styles beat any global CSS).
       map.on('click', 'vehicles', (e) => {
         const p = e.features?.[0]?.properties as { route_id: string; vehicle_id: string } | undefined;
         if (!p) return;
-        new maplibregl.Popup()
+        new maplibregl.Popup({ closeButton: false, offset: 12 })
           .setLngLat(e.lngLat)
-          .setHTML(`<b>${p.route_id}</b><br>vehicle ${p.vehicle_id}`)
+          .setHTML(
+            `<div style="font:13px system-ui,sans-serif;color:#111">` +
+            `<b style="font-size:14px">${p.route_id}</b><br>vehicle ${p.vehicle_id}</div>`,
+          )
           .addTo(map);
       });
 
-      // Click a stop -> popup with predicted arrivals from the ML model.
-      map.on('click', 'stops', async (e) => {
+      // Click a stop -> open the rich React prediction panel.
+      map.on('click', 'stops', (e) => {
         const p = e.features?.[0]?.properties as { stop_id: string; stop_name?: string } | undefined;
-        if (!p) return;
-        const title = p.stop_name ?? 'Stop';
-        const popup = new maplibregl.Popup()
-          .setLngLat(e.lngLat)
-          .setHTML(`<b>${title}</b><br>loading…`)
-          .addTo(map);
-        try {
-          const res = await fetch(`${API}/stops/${encodeURIComponent(p.stop_id)}/arrivals`);
-          const data: { arrivals: { route: string; predicted_delay_s: number | null }[] } = await res.json();
-          const rows = data.arrivals.map((a) => `${a.route} — ${delayLabel(a.predicted_delay_s)}`).join('<br>')
-            || 'No predicted arrivals right now.';
-          popup.setHTML(`<b>${title}</b><br>${rows}`);
-        } catch {
-          popup.setHTML(`<b>${title}</b><br>(could not load predictions)`);
-        }
+        if (p) setSelectedStop({ id: p.stop_id, name: p.stop_name ?? 'Stop' });
       });
 
       for (const layer of ['vehicles', 'stops']) {
@@ -138,6 +121,9 @@ export default function LiveMap() {
         <span style={{ color: connected ? '#3f3' : '#f33' }}>●</span>{' '}
         {connected ? `live — ${count ?? 0} vehicles` : 'connecting…'}
       </div>
+      {selectedStop && (
+        <StopPanel stop={selectedStop} onClose={() => setSelectedStop(null)} />
+      )}
       <div ref={container} style={{ position: 'absolute', inset: 0 }} />
     </>
   );

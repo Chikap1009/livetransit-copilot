@@ -47,3 +47,15 @@ a {
     color-scheme: dark;
   }
 }
+
+/* Keep MapLibre popups readable even with CopilotKit's global styles loaded. */
+.maplibregl-popup-content {
+  color: #111;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+}
+.maplibregl-popup-content b {
+  color: #111;
+}
