@@ -12,7 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 
+from backend.app.agent.copilot import Deps, copilot
+from backend.app.agent.gateway import USAGE_LIMITS
 from backend.app.core import config, metrics
 from backend.app.ml import predictor
 
@@ -93,6 +96,23 @@ async def track_latency(request: Request, call_next):
 async def prometheus_metrics():
     """Prometheus scrape endpoint."""
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/agent/ask")
+async def agent_ask(req: AskRequest):
+    """Run the Copilot agent on an English question (ReAct loop over the live tools)."""
+    result = await copilot.run(req.question, deps=Deps(pool=pool), usage_limits=USAGE_LIMITS)
+    tools_used = [
+        part.tool_name
+        for msg in result.all_messages()
+        for part in getattr(msg, "parts", [])
+        if part.__class__.__name__ == "ToolCallPart"
+    ]
+    return {"answer": result.output, "tools_used": tools_used}
 
 
 async def cached_json(key: str, ttl: int, compute):
