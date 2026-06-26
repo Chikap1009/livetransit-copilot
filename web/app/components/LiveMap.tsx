@@ -177,7 +177,11 @@ export default function LiveMap() {
   useCopilotAction({
     name: 'clearMap',
     description: 'Remove all agent highlights and pins from the map.',
-    parameters: [],
+    // A no-parameter action makes some models emit non-object args (CopilotKit then
+    // errors), so we declare one harmless optional param. The handler ignores it.
+    parameters: [
+      { name: 'reason', type: 'string', description: 'optional, ignored', required: false },
+    ],
     handler: () => {
       const map = mapRef.current;
       if (map?.getLayer('route-highlight')) {
