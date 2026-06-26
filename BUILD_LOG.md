@@ -913,3 +913,37 @@ Observability: /metrics on all services → Prometheus (:9090, scrape 10s, 2 ale
 Phase 7 **Concept Check** (logs vs metrics; counter/gauge/histogram; p99 & why over average).
 Then continue — likely **Phase 8** (pytest: dedupe/idempotency, arrival detection, feature build,
 API contract) and/or **Phase 9** (CI/CD), while data collects for tomorrow's retrain.
+
+---
+
+## Entry 25 — Phase 7 Concept Check + Phase 8: tests; PHASE 8 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 7 → 8
+
+### Phase 7 Concept Check — PASSED
+Logs=text events vs metrics=numbers over time for live analysis ✓; counter up-only / gauge up-down
+✓; histogram corrected (= distribution via buckets → percentiles, not "a plot"); **taught p50/p99**
+(user didn't know): p99 = 99% faster than this = the slow tail; care over average because averages
+hide bad outliers that real users feel.
+
+### Concept taught (Phase 8)
+- Test the logic that would silently corrupt data/mislead: idempotency, feature/label correctness,
+  API contract. Not trivial getters. Unit (fast, pure) vs integration (real test DB).
+
+### What we did
+- `pytest==9.1.1` (+ `backend/requirements-dev.txt`), `pytest.ini` (testpaths=backend/tests).
+- **Unit** `test_ingest.py`: `parse_feed` (synthetic protobuf: keeps only vehicles w/ position,
+  skips alerts) + `to_row` (lon,lat order; ts→datetime; bearing/empty→None; recorded_at fallback).
+  Caught float32: protobuf lat/lon → use `pytest.approx`.
+- **Integration** `conftest.py` (disposable `livetransit_test` DB, sync psycopg, skips if no PG) +
+  `test_integration.py`: idempotent INSERT (dup key → 1 row), history kept + latest-per-vehicle,
+  geom (lon,lat) in Boston. Exercises the REAL `INSERT_SQL`.
+- Also installed prometheus-client into the venv (poller import needs it for tests).
+- **6 passed.** Committed `722ba4d`.
+
+### Phase 8 status: ✅ COMPLETE (pending Concept Check). Run: `.venv\Scripts\python.exe -m pytest`.
+
+### Next step
+Phase 8 **Concept Check** (unit vs integration vs e2e; what's most worth testing here; why fixtures
+over live feed). Then **Phase 9** (GitHub Actions CI: lint + pytest w/ Postgres service container +
+build image). Retrain model tomorrow w/ full-day data (see memory).
