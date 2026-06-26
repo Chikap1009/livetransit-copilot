@@ -22,6 +22,21 @@ Bonus: H3 neighborhood lookup (`WHERE h3_cell = ...`) uses an `Index Only Scan` 
 - Idempotent at-least-once processing: `INSERT ... ON CONFLICT (vehicle_id, recorded_at)
   DO NOTHING`. Verified **0 duplicate rows** under continuous re-publishing.
 
+### ML arrival predictor (Phase 6) — LightGBM delay-propagation model
+Framing: predict a vehicle's delay at an upcoming stop from its current (upstream) delay +
+hour/day/route/stop_sequence. **Time-based split** (train on earlier ~80%, test on later ~20%)
+to prevent leakage. ~30,800 clean labels (filtered |delay|≤30 min, approach <60 m).
+
+| Predictor | MAE (s) on held-out later period |
+|---|---|
+| Baseline: schedule (assume on-time) | 249.3 |
+| Baseline: historical avg per route | 203.7 |
+| Baseline: persistence (next = current) | 48.7 |
+| **LightGBM model** | **44.0** |
+
+**82.3% better than schedule**, **9.6% better than the strong persistence baseline**. CPU-trained
+in seconds (no GPU). Re-trains as more history accrues.
+
 ## Brain (Copilot)
 _To be captured in the agentic phases (A–J): tool count, eval scores, agent latency,
 tokens/cost per query, fallback behavior, RAG citation rate._
