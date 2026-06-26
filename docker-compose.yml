@@ -110,6 +110,22 @@ services:
       - api
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: lt-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # view the dashboard without logging in (local demo)
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"                          # 3000 is taken by Martin tiles
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:                                    # named volumes managed by Docker
   pgdata:
   redisdata:

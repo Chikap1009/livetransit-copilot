@@ -1,0 +1,82 @@
+{
+  "id": null,
+  "uid": "livetransit-body",
+  "title": "LiveTransit — Body Health",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Ingestion (events/sec)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 0, "w": 16, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(lt_poller_positions_published_total{job=\"poller\"}[1m])", "legendFormat": "published" },
+        { "refId": "B", "expr": "rate(lt_processor_messages_total{job=\"processor\"}[1m])", "legendFormat": "processed" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Feed age (s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 30 }, { "color": "red", "value": 60 }
+          ] }
+        }, "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [ { "refId": "A", "expr": "time() - lt_poller_last_feed_timestamp_seconds{job=\"poller\"}" } ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "WebSocket clients",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 16, "y": 4, "w": 8, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "lt_api_ws_clients{job=\"api\"}" } ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "API request latency (p50 / p99)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 8, "w": 16, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum(rate(lt_api_request_seconds_bucket{job=\"api\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum(rate(lt_api_request_seconds_bucket{job=\"api\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Poll failures (total)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 16, "y": 8, "w": 8, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "lt_poller_poll_failures_total{job=\"poller\"}" } ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Positions published (total)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 16, "y": 12, "w": 8, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "lt_poller_positions_published_total{job=\"poller\"}" } ]
+    }
+  ]
+}
