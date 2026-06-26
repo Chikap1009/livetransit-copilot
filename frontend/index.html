@@ -16,10 +16,30 @@
     }
     #status .dot { color: #f33; }
     #status.ok .dot { color: #3f3; }
+    #panel {
+      position: absolute; top: 10px; right: 10px; z-index: 2; width: 290px;
+      max-height: 82vh; overflow: auto; background: #fff; border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.35); font: 13px system-ui, sans-serif; display: none;
+    }
+    #panel header {
+      padding: 10px 12px; background: #1a1a2e; color: #fff; border-radius: 8px 8px 0 0;
+      font-weight: 600; display: flex; justify-content: space-between; align-items: center;
+    }
+    #panel .close { cursor: pointer; opacity: .8; }
+    #panel .row {
+      padding: 8px 12px; border-bottom: 1px solid #eee;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #panel .route { font-weight: 700; }
+    #panel .eta { text-align: right; line-height: 1.35; }
+    #panel .late { color: #c0392b; } #panel .early { color: #2980b9; }
+    #panel footer { padding: 8px 12px; color: #555; font-size: 11px; background: #f7f7f7;
+      border-radius: 0 0 8px 8px; }
   </style>
 </head>
 <body>
   <div id="status"><span class="dot">●</span> connecting…</div>
+  <div id="panel"></div>
   <div id="map"></div>
   <script>
     const map = new maplibregl.Map({
@@ -50,10 +70,8 @@
         },
       });
       map.on('click', 'stops', (e) => {
-        new maplibregl.Popup()
-          .setLngLat(e.lngLat)
-          .setHTML(`<b>${e.features[0].properties.stop_name || 'stop'}</b>`)
-          .addTo(map);
+        const p = e.features[0].properties;
+        showStop(p.stop_id, p.stop_name);
       });
 
       // --- Live vehicles (added last so the dots sit on top of the network) ---
@@ -94,6 +112,40 @@
     });
 
     const status = document.getElementById('status');
+    const panel = document.getElementById('panel');
+
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleTimeString('en-US',
+        { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
+    }
+
+    function delayTag(d) {
+      if (d == null) return '';
+      const m = Math.max(1, Math.round(Math.abs(d) / 60));
+      if (d > 30) return `<span class="late">${m}m late</span>`;
+      if (d < -30) return `<span class="early">${m}m early</span>`;
+      return 'on time';
+    }
+
+    async function showStop(stopId, stopName) {
+      const head = `<header><span>${stopName || 'Stop'}</span>` +
+        `<span class="close" onclick="panel.style.display='none'">&times;</span></header>`;
+      panel.style.display = 'block';
+      panel.innerHTML = head + '<div class="row">Loading predictions…</div>';
+      try {
+        const data = await (await fetch(`/stops/${encodeURIComponent(stopId)}/arrivals`)).json();
+        const rows = data.arrivals.map((a) =>
+          `<div class="row"><span class="route">${a.route_id}</span>` +
+          `<span class="eta">${fmtTime(a.predicted_eta || a.scheduled)}<br>${delayTag(a.predicted_delay_s)}</span></div>`
+        ).join('') || '<div class="row">No predicted arrivals right now.</div>';
+        const acc = data.accuracy;
+        panel.innerHTML = head + rows +
+          `<footer>Predicted ETAs from a LightGBM model.<br>` +
+          `MAE <b>${acc.mae_model_s}s</b> vs schedule baseline ${acc.mae_schedule_s}s.</footer>`;
+      } catch (err) {
+        panel.innerHTML = head + '<div class="row">Could not load predictions.</div>';
+      }
+    }
 
     function connect() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
