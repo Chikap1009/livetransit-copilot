@@ -1022,3 +1022,38 @@ corrected #3: CI needs its own DB because the runner has NONE + isolation + repr
 Phase A **Concept Check** (draw ReAct loop; what a tool is + function calling; question→answer
 flow; why hosted LLM). Then **Phase B** (structured outputs + streaming reasoning). Retrain ETA
 model tomorrow (memory).
+
+---
+
+## Entry 28 — Phase A Concept Check + Phase B: structured outputs + streaming; COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase A → B
+
+### Phase A Concept Check — PASSED
+ReAct loop ✓; tool=function, model decides+requests / your code runs (sharpened) ✓; flow w/ live
+data entering at tool execution ✓; hosted = VRAM + server-reachable ✓.
+
+### Concepts taught (Phase B)
+- **Structured outputs**: model fills a Pydantic schema (not prose); validated; auto-retry on
+  malformed → dependable, app-consumable data. **Streaming**: push tool-steps + answer live; the
+  visible reasoning trace is the agentic "wow".
+
+### What we did
+- `agent/schemas.py`: `ArrivalAnswer` (stop + Arrival[route,eta,status] + summary) and `Answer`
+  (summary+routes+facts). `copilot` `output_type=[ArrivalAnswer, Answer]` → model picks + validates.
+- `POST /agent/ask` returns `{answer_type, answer (validated obj), tools_used}`. Learned: structured
+  output is delivered via an internal `final_result_*` tool (filtered out).
+- `GET /agent/stream` (SSE) via `copilot.iter()`: emits `tool` events live, then a `result` event
+  with the structured answer. Minimal chat box added to the map page (EventSource).
+- **Bugs:** (1) v2 provider name (prev entry); (2) E501 lint → used `isinstance(ToolCallPart)`;
+  pushed lint-failing commit then fix — CI red then green (2527753).
+- Verified: `/agent/ask` returns Answer vs ArrivalAnswer correctly; SSE streams tool events then
+  result; **user confirmed** chat box streams steps + shows answer card. Commits `8cc7fd6`,
+  `2527753`.
+
+### Phase B status: ✅ COMPLETE (pending Concept Check).
+
+### Next step
+Phase B **Concept Check** (why structured outputs + malformed handling; what's streamed + why the
+tool-step trace matters). Then **Phase C** (Next.js + CopilotKit + map fusion — agent draws on the
+map). Retrain ETA model tomorrow (memory `retrain-eta-model-full-day`).
