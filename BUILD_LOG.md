@@ -819,3 +819,35 @@ late-night/timezone edge cases). User chose START NOW; outliers filtered in the 
 numpy, no pandas) + `GET /stops/{id}/arrivals` (upcoming arrivals for running trips → predicted
 ETA). Mount `./models` into the api container; add lightgbm to API image. Frontend: stop click →
 predicted-arrivals panel + accuracy (MAE vs baseline). Then Phase 6 Concept Check.
+
+---
+
+## Entry 22 — Phase 6, Sub-step 6c: serve predictions + UI panel; PHASE 6 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 6 (ML core)
+
+### What we did
+- `backend/app/ml/predictor.py`: load model via `lgb.Booster` + numpy (no pandas → lean API
+  image); `predict_delays(rows)`; exposes meta (MAE stats).
+- `main.py`: load model in lifespan (graceful if absent); `GET /stops/{id}/arrivals` — active trips
+  today ⋈ stop_times for the stop, not yet reached, **|current_delay|<=1800 filter** (drops corrupt
+  after-midnight delays), predict → ETA = scheduled + predicted_delay; returns accuracy block.
+- `Dockerfile`: **+libgomp1** (LightGBM OpenMP runtime; missing on slim → was the startup crash).
+- compose: mount `./models:/app/models:ro`. `lightgbm` added to API requirements.
+- `frontend/index.html`: stop click → side panel with predicted arrivals (time + early/late tag,
+  Boston tz) + footer "MAE 44s vs schedule 249s".
+- **Bugs fixed:** (1) libgomp1 missing → API crash. (2) serving fed raw outlier current_delay
+  (~-24h after-midnight) → garbage preds; added |delay|<=1800 serving filter.
+- Verified: endpoint returns sensible preds (route 28: current -871s → pred -566s); user confirmed
+  the UI panel + accuracy footer render. Commits `a3c8021` (backend), `314eae5` (frontend).
+
+### >>> REMINDER (saved to memory `retrain-eta-model-full-day`) <<<
+Model v1 trained on evening+overnight ONLY. **On/after 2026-06-27**, once full-day data (incl.
+morning rush) is collected, RETRAIN: `python -m backend.app.ml.train` + `docker compose restart
+api`, then do an MAE split-by-hour eval. User asked to be reminded next session.
+
+### Phase 6 status: ✅ COMPLETE (pipeline; v1 model). Stack still RUNNING to collect full-day data.
+
+### Next step
+Phase 6 **Concept Check**, then continue building (Phase 7 observability, or 8/9) while data
+collects. Retrain tomorrow.
