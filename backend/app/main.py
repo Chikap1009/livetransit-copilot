@@ -8,6 +8,7 @@ from datetime import timedelta
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg.rows import dict_row
@@ -110,9 +111,37 @@ async def agent_ask(req: AskRequest):
         part.tool_name
         for msg in result.all_messages()
         for part in getattr(msg, "parts", [])
-        if part.__class__.__name__ == "ToolCallPart"
+        # exclude Pydantic AI's internal "final_result_*" output tool
+        if part.__class__.__name__ == "ToolCallPart" and not part.tool_name.startswith("final_result")
     ]
-    return {"answer": result.output, "tools_used": tools_used}
+    return {
+        "answer_type": type(result.output).__name__,
+        "answer": result.output,        # a validated Pydantic object
+        "tools_used": tools_used,
+    }
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.get("/agent/stream")
+async def agent_stream(q: str):
+    """Stream the agent's tool steps (live) then the final structured answer, over SSE."""
+    async def gen():
+        async with copilot.iter(q, deps=Deps(pool=pool), usage_limits=USAGE_LIMITS) as run:
+            async for node in run:
+                model_response = getattr(node, "model_response", None)
+                if model_response is None:
+                    continue
+                for part in getattr(model_response, "parts", []):
+                    name = getattr(part, "tool_name", None)
+                    if name and not name.startswith("final_result"):
+                        yield _sse("tool", {"tool": name})
+            out = run.result.output
+            yield _sse("result", {"answer_type": type(out).__name__, "answer": out.model_dump()})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 async def cached_json(key: str, ttl: int, compute):

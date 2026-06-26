@@ -6,6 +6,7 @@ from pydantic_ai import Agent, RunContext
 
 from backend.app.agent import tools
 from backend.app.agent.gateway import MODEL
+from backend.app.agent.schemas import Answer, ArrivalAnswer
 
 
 @dataclass
@@ -22,7 +23,12 @@ SYSTEM_PROMPT = (
     "'1' or '66'. Be concise and specific; if a tool returns no data, say so plainly."
 )
 
-copilot = Agent(MODEL, deps_type=Deps, system_prompt=SYSTEM_PROMPT)
+copilot = Agent(
+    MODEL,
+    deps_type=Deps,
+    output_type=[ArrivalAnswer, Answer],   # the model fills (and we validate) one of these
+    system_prompt=SYSTEM_PROMPT,
+)
 
 
 @copilot.tool

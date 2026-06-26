@@ -35,11 +35,29 @@
     #panel .late { color: #c0392b; } #panel .early { color: #2980b9; }
     #panel footer { padding: 8px 12px; color: #555; font-size: 11px; background: #f7f7f7;
       border-radius: 0 0 8px 8px; }
+    #chat {
+      position: absolute; bottom: 14px; left: 14px; z-index: 3; width: 340px;
+      background: #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.35);
+      font: 13px system-ui, sans-serif; overflow: hidden;
+    }
+    #chat header { background: #1a1a2e; color: #fff; padding: 8px 12px; font-weight: 600; }
+    #chatlog { max-height: 300px; overflow: auto; padding: 8px 12px; }
+    #chatlog .step { color: #777; font-style: italic; margin: 2px 0; }
+    #chatlog .you { font-weight: 600; margin-top: 8px; }
+    #chatlog .card { background: #f4f6fb; border-left: 3px solid #1a73e8;
+      padding: 6px 8px; margin: 6px 0; border-radius: 4px; }
+    #chat input { width: 100%; border: 0; border-top: 1px solid #eee; padding: 10px 12px;
+      font-size: 13px; box-sizing: border-box; outline: none; }
   </style>
 </head>
 <body>
   <div id="status"><span class="dot">●</span> connecting…</div>
   <div id="panel"></div>
+  <div id="chat">
+    <header>🤖 Copilot</header>
+    <div id="chatlog"><div class="step">Ask about routes, arrivals, or alerts…</div></div>
+    <input id="chatinput" placeholder="e.g. Where are the Red Line trains?" autocomplete="off" />
+  </div>
   <div id="map"></div>
   <script>
     const map = new maplibregl.Map({
@@ -113,6 +131,45 @@
 
     const status = document.getElementById('status');
     const panel = document.getElementById('panel');
+
+    // --- Copilot chat (streams tool steps + a structured answer over SSE) ---
+    const chatlog = document.getElementById('chatlog');
+    const chatinput = document.getElementById('chatinput');
+
+    function logEl(html, cls) {
+      const d = document.createElement('div');
+      if (cls) d.className = cls;
+      d.innerHTML = html;
+      chatlog.appendChild(d);
+      chatlog.scrollTop = chatlog.scrollHeight;
+    }
+
+    chatinput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !chatinput.value.trim()) return;
+      const q = chatinput.value.trim();
+      chatinput.value = '';
+      chatinput.disabled = true;
+      logEl('You: ' + q, 'you');
+      const es = new EventSource('/agent/stream?q=' + encodeURIComponent(q));
+      es.addEventListener('tool', (ev) => {
+        logEl('🔧 calling ' + JSON.parse(ev.data).tool + '…', 'step');
+      });
+      es.addEventListener('result', (ev) => {
+        const r = JSON.parse(ev.data);
+        const a = r.answer;
+        let html = '<b>' + (a.summary || '') + '</b>';
+        if (r.answer_type === 'ArrivalAnswer' && a.arrivals) {
+          html += '<br>' + a.arrivals.map((x) => `${x.route} — ${x.status}`).join('<br>');
+        } else if (a.facts && a.facts.length) {
+          html += '<br>' + a.facts.map((f) => '• ' + f).join('<br>');
+        }
+        logEl(html, 'card');
+        es.close();
+        chatinput.disabled = false;
+        chatinput.focus();
+      });
+      es.onerror = () => { es.close(); chatinput.disabled = false; };
+    });
 
     function fmtTime(iso) {
       return new Date(iso).toLocaleTimeString('en-US',
