@@ -786,3 +786,36 @@ User chose to accumulate richer history before training. Set up **autonomous col
 - **RESUME POINT:** when user returns, START **Phase 6** (LightGBM ETA predictor): features →
   baselines (schedule + historical avg) → time-split train → MAE vs baseline → serve
   `GET /stops/{id}/arrivals` → frontend accuracy panel.
+
+---
+
+## Entry 21 — Phase 6, Sub-steps 6a–6b: features + trained model (MAE 44s)
+**Date:** 2026-06-26
+**Phase:** Phase 6 (ML core)
+
+### Data check before starting
+~37k arrivals over ~7h (evening+overnight, 162 routes). ~7% outlier labels (|delay|>1h from
+late-night/timezone edge cases). User chose START NOW; outliers filtered in the feature step.
+
+### Concept / design
+- **Framing**: delay-propagation regression — predict delay at an upcoming stop from current
+  (upstream) delay + hour/dow/route/stop_sequence. `eta = scheduled + predicted_delay`.
+- **Leakage guard**: features only from the prior stop; **time-based split** (earlier 80% train,
+  later 20% test), never random.
+- ML deps installed in venv on Python 3.14 (lightgbm 4.6.0, pandas 3.0.3, sklearn 1.9.0) — wheels
+  exist, no container needed. Pinned in `backend/requirements-ml.txt`.
+
+### What we did
+- `backend/app/ml/features.py`: SQL self-join on vehicle_arrivals -> (current_delay, hour, dow,
+  stop_sequence, route_id) + target_delay; filters |delay|<=1800s & dist_m<60. **30,784 clean
+  rows**, corr(current_delay,target_delay)=**0.952**.
+- `backend/app/ml/train.py`: time-split; baselines + LightGBM; saves model+meta to `models/`
+  (git-ignored). Held-out MAE (s): schedule 249.3, hist-avg 203.7, persistence 48.7, **MODEL 44.0**
+  → 82.3% better than schedule, 9.6% better than persistence. Recorded in METRICS.md.
+- Commits `f781ac8` (features), `77cb0d2` (train+metrics). Model file NOT committed (git-ignored).
+
+### Next step
+**Phase 6, Sub-step 6c:** serve predictions. `predictor.py` (load model via lightgbm Booster +
+numpy, no pandas) + `GET /stops/{id}/arrivals` (upcoming arrivals for running trips → predicted
+ETA). Mount `./models` into the api container; add lightgbm to API image. Frontend: stop click →
+predicted-arrivals panel + accuracy (MAE vs baseline). Then Phase 6 Concept Check.
