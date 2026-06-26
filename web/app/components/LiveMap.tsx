@@ -1,10 +1,13 @@
 'use client';
 
+import { useCopilotAction } from '@copilotkit/react-core';
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import StopPanel from './StopPanel';
+
+const NO_ROUTE = '__none__';
 
 const TILES = 'http://localhost:3000';            // Martin tile server
 const WS_URL = 'ws://localhost:8000/ws/vehicles'; // live vehicle feed
@@ -20,6 +23,8 @@ const SUBWAY_COLORS: maplibregl.ExpressionSpecification = [
 
 export default function LiveMap() {
   const container = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const pinsRef = useRef<maplibregl.Marker[]>([]);
   const [connected, setConnected] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [selectedStop, setSelectedStop] = useState<{ id: string; name: string } | null>(null);
@@ -32,6 +37,7 @@ export default function LiveMap() {
       center: [-71.0589, 42.3601],
       zoom: 11,
     });
+    mapRef.current = map;
 
     let ws: WebSocket | null = null;
 
@@ -41,6 +47,12 @@ export default function LiveMap() {
       map.addLayer({
         id: 'routes', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
         paint: { 'line-color': ['get', 'route_color'], 'line-width': 2, 'line-opacity': 0.85 },
+      });
+      // Agent-controlled highlight overlay (starts matching nothing).
+      map.addLayer({
+        id: 'route-highlight', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
+        filter: ['==', ['get', 'route_id'], NO_ROUTE],
+        paint: { 'line-color': '#FFD400', 'line-width': 7, 'line-opacity': 0.9, 'line-blur': 1 },
       });
       map.addSource('stops', { type: 'vector', url: `${TILES}/stops` });
       map.addLayer({
@@ -105,9 +117,66 @@ export default function LiveMap() {
 
     return () => {
       ws?.close();
+      pinsRef.current.forEach((m) => m.remove());
+      pinsRef.current = [];
+      mapRef.current = null;
       map.remove();
     };
   }, []);
+
+  // --- Map-fusion actions the agent can call (CopilotKit forwards them as tools) ---
+  useCopilotAction({
+    name: 'highlightRoute',
+    description:
+      'Highlight a single MBTA route line on the map. Call this whenever the user asks to ' +
+      'show, highlight, or point out a route. The route id is like Red, Orange, Blue, Green-B, ' +
+      '1, or 66.',
+    parameters: [{ name: 'route', type: 'string', description: 'MBTA route id', required: true }],
+    handler: ({ route }: { route: string }) => {
+      const map = mapRef.current;
+      if (!map?.getLayer('route-highlight')) return;
+      map.setFilter('route-highlight', ['==', ['get', 'route_id'], route]);
+    },
+  });
+
+  useCopilotAction({
+    name: 'dropPin',
+    description: 'Drop a labeled pin at a latitude/longitude and fly the map there.',
+    parameters: [
+      { name: 'lat', type: 'number', description: 'latitude', required: true },
+      { name: 'lon', type: 'number', description: 'longitude', required: true },
+      { name: 'label', type: 'string', description: 'short label', required: false },
+    ],
+    handler: ({ lat, lon, label }: { lat: number; lon: number; label?: string }) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const marker = new maplibregl.Marker({ color: '#1a73e8' }).setLngLat([lon, lat]);
+      if (label) {
+        marker.setPopup(
+          new maplibregl.Popup({ offset: 24 }).setHTML(
+            `<div style="font:13px system-ui;color:#111">${label}</div>`,
+          ),
+        );
+      }
+      marker.addTo(map);
+      pinsRef.current.push(marker);
+      map.flyTo({ center: [lon, lat], zoom: 14 });
+    },
+  });
+
+  useCopilotAction({
+    name: 'clearMap',
+    description: 'Remove all agent highlights and pins from the map.',
+    parameters: [],
+    handler: () => {
+      const map = mapRef.current;
+      if (map?.getLayer('route-highlight')) {
+        map.setFilter('route-highlight', ['==', ['get', 'route_id'], NO_ROUTE]);
+      }
+      pinsRef.current.forEach((m) => m.remove());
+      pinsRef.current = [];
+    },
+  });
 
   return (
     <>

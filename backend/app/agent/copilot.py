@@ -23,7 +23,11 @@ SYSTEM_PROMPT = (
     "THEN write your final answer using that result. Never write a final answer that says you "
     "'will check' or describes intent — actually call the tool first. Never invent data from "
     "memory.\n"
-    "Routes are named like 'Red', 'Orange', 'Blue', 'Green-B', or bus numbers like '1' or '66'. "
+    "Routes are named like 'Red', 'Orange', 'Blue', 'Green-B', or bus numbers like '1' or '66'.\n"
+    "You can also DRAW ON THE MAP with these actions: highlightRoute(route) to highlight a route "
+    "line, dropPin(lat, lon, label) to mark a location, and clearMap to reset. When the user asks "
+    "to SHOW, HIGHLIGHT, or POINT OUT a route on the map, call highlightRoute (and still give a "
+    "short text reply).\n"
     "Be concise and specific; if a tool returns no data, say so plainly."
 )
 
