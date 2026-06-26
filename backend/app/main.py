@@ -155,6 +155,20 @@ async def agent_stream(q: str):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+@app.post("/agent/ag-ui")
+async def agent_ag_ui(request: Request):
+    """AG-UI protocol endpoint (text output) — what CopilotKit connects to."""
+    from pydantic_ai.ui.ag_ui import AGUIAdapter
+
+    return await AGUIAdapter.dispatch_request(
+        request,
+        agent=copilot,
+        deps=Deps(pool=pool),
+        output_type=str,           # natural-language chat (override the structured output)
+        usage_limits=USAGE_LIMITS,
+    )
+
+
 async def cached_json(key: str, ttl: int, compute):
     """Return cached JSON for `key`, or run `compute()`, cache it (EX=ttl), return it."""
     hit = await rds.get(key)
