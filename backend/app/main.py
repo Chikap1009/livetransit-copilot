@@ -263,6 +263,7 @@ async def stop_arrivals(stop_id: str):
             FROM vehicle_arrivals
             WHERE service_date = (now() AT TIME ZONE 'America/New_York')::date
             GROUP BY trip_id, route_id
+            HAVING max(arrived_at) >= now() - interval '30 minutes'  -- still running
         ),
         cand AS (
             SELECT a.trip_id, a.route_id, a.current_delay, st.stop_sequence,
@@ -278,6 +279,7 @@ async def stop_arrivals(stop_id: str):
                EXTRACT(hour FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS hour,
                EXTRACT(dow  FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS dow
         FROM cand
+        WHERE scheduled_ts >= now() - interval '2 minutes'           -- future arrivals only
         ORDER BY scheduled_ts
         LIMIT 10
     """

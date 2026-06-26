@@ -38,6 +38,7 @@ async def predict_eta(pool: AsyncConnectionPool, stop_id: str) -> dict:
             FROM vehicle_arrivals
             WHERE service_date = (now() AT TIME ZONE 'America/New_York')::date
             GROUP BY trip_id, route_id
+            HAVING max(arrived_at) >= now() - interval '30 minutes'   -- still running
         ),
         cand AS (
             SELECT a.trip_id, a.route_id, a.current_delay, st.stop_sequence,
@@ -51,7 +52,9 @@ async def predict_eta(pool: AsyncConnectionPool, stop_id: str) -> dict:
         SELECT route_id, current_delay, stop_sequence, scheduled_ts,
                EXTRACT(hour FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS hour,
                EXTRACT(dow  FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS dow
-        FROM cand ORDER BY scheduled_ts LIMIT 6
+        FROM cand
+        WHERE scheduled_ts >= now() - interval '2 minutes'           -- future arrivals only
+        ORDER BY scheduled_ts LIMIT 6
     """
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(sql, (stop_id,))
