@@ -53,6 +53,7 @@ services:
       - "8000:8000"
     volumes:
       - ./frontend:/app/frontend:ro      # serve the live-map page (no rebuild on edits)
+      - ./models:/app/models:ro          # trained ETA model (loaded at startup)
     depends_on:
       postgres:
         condition: service_healthy

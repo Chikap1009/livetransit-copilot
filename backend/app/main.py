@@ -3,6 +3,7 @@ import asyncio
 import json
 import sys
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -11,6 +12,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from backend.app.core import config
+from backend.app.ml import predictor
 
 # How recent a position must be to count as a vehicle's "current" location.
 RECENT_WINDOW = "90 seconds"
@@ -57,6 +59,10 @@ async def lifespan(app: FastAPI):
     pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=5, open=False)
     await pool.open()
     rds = redis.from_url(config.REDIS_URL, decode_responses=True)
+    try:
+        predictor.load()  # ETA model (optional: endpoint degrades gracefully if absent)
+    except Exception as exc:
+        print(f"ETA model not loaded: {exc}")
     task = asyncio.create_task(broadcaster())
     yield
     task.cancel()
@@ -149,6 +155,61 @@ async def vehicles_near(
 
     key = f"near:{round(lat, 4)}:{round(lon, 4)}:{int(radius_m)}"
     return await cached_json(key, ttl=5, compute=compute)
+
+
+@app.get("/stops/{stop_id}/arrivals")
+async def stop_arrivals(stop_id: str):
+    """Predicted upcoming arrivals at a stop, for trips currently running today."""
+    sql = """
+        WITH active AS (
+            SELECT trip_id, route_id,
+                   max(stop_sequence) AS cur_seq,
+                   (array_agg(delay_seconds ORDER BY stop_sequence DESC))[1] AS current_delay
+            FROM vehicle_arrivals
+            WHERE service_date = (now() AT TIME ZONE 'America/New_York')::date
+            GROUP BY trip_id, route_id
+        ),
+        cand AS (
+            SELECT a.trip_id, a.route_id, a.current_delay, st.stop_sequence,
+                   (((now() AT TIME ZONE 'America/New_York')::date::timestamp
+                     AT TIME ZONE 'America/New_York') + st.arrival_time::interval) AS scheduled_ts
+            FROM active a
+            JOIN stop_times st
+              ON st.trip_id = a.trip_id AND st.stop_id = %s AND st.arrival_time <> ''
+            WHERE st.stop_sequence > a.cur_seq        -- trip hasn't reached this stop yet
+              AND abs(a.current_delay) <= 1800        -- ignore corrupt (after-midnight) delays
+        )
+        SELECT trip_id, route_id, current_delay, stop_sequence, scheduled_ts,
+               EXTRACT(hour FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS hour,
+               EXTRACT(dow  FROM scheduled_ts AT TIME ZONE 'America/New_York')::int AS dow
+        FROM cand
+        ORDER BY scheduled_ts
+        LIMIT 10
+    """
+    rows = await fetch(sql, (stop_id,))
+    for r in rows:
+        r["current_delay"] = float(r["current_delay"] or 0)
+    preds = predictor.predict_delays(rows) if predictor.is_loaded() else [None] * len(rows)
+
+    arrivals = []
+    for r, d in zip(rows, preds):
+        arrivals.append({
+            "route_id": r["route_id"],
+            "scheduled": r["scheduled_ts"],
+            "current_delay_s": round(r["current_delay"]),
+            "predicted_delay_s": round(d) if d is not None else None,
+            "predicted_eta": r["scheduled_ts"] + timedelta(seconds=d) if d is not None else None,
+        })
+    m = predictor.meta()
+    return {
+        "stop_id": stop_id,
+        "arrivals": arrivals,
+        "accuracy": {
+            "mae_model_s": m.get("mae_model_s"),
+            "mae_schedule_s": m.get("mae_schedule_s"),
+            "mae_persistence_s": m.get("mae_persistence_s"),
+        },
+    }
 
 
 @app.get("/vehicles/cell/{h3}")
