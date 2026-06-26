@@ -1,0 +1,22 @@
+# Prometheus alerting rules. (Rules evaluate here and show on /alerts; routing to
+# notifications would need Alertmanager — not wired for this local setup.)
+groups:
+  - name: livetransit
+    rules:
+      - alert: FeedStale
+        expr: time() - lt_poller_last_feed_timestamp_seconds > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GTFS-RT feed is stale (>60s old)"
+          description: "The newest vehicle position is over 60s old — the poller may be stuck or the feed down."
+
+      - alert: ProcessorStalled
+        expr: rate(lt_processor_messages_total[2m]) == 0 and rate(lt_poller_positions_published_total[2m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Processor not consuming"
+          description: "Poller is publishing but the processor has processed nothing for 2m — pipeline backed up."
