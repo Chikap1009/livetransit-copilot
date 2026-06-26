@@ -48,11 +48,18 @@ export default function LiveMap() {
         id: 'routes', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
         paint: { 'line-color': ['get', 'route_color'], 'line-width': 2, 'line-opacity': 0.85 },
       });
-      // Agent-controlled highlight overlay (starts matching nothing).
+      // Agent-controlled highlight: a dark casing + bright cyan "neon" core, drawn
+      // above the routes (both start matching nothing). On highlight we also dim the
+      // base routes so the chosen one pops.
+      map.addLayer({
+        id: 'route-highlight-casing', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
+        filter: ['==', ['get', 'route_id'], NO_ROUTE],
+        paint: { 'line-color': '#0b0b16', 'line-width': 10, 'line-opacity': 0.95 },
+      });
       map.addLayer({
         id: 'route-highlight', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
         filter: ['==', ['get', 'route_id'], NO_ROUTE],
-        paint: { 'line-color': '#FFD400', 'line-width': 7, 'line-opacity': 0.9, 'line-blur': 1 },
+        paint: { 'line-color': '#18ffff', 'line-width': 4, 'line-opacity': 1, 'line-blur': 1 },
       });
       map.addSource('stops', { type: 'vector', url: `${TILES}/stops` });
       map.addLayer({
@@ -135,7 +142,10 @@ export default function LiveMap() {
     handler: ({ route }: { route: string }) => {
       const map = mapRef.current;
       if (!map?.getLayer('route-highlight')) return;
-      map.setFilter('route-highlight', ['==', ['get', 'route_id'], route]);
+      const f: maplibregl.FilterSpecification = ['==', ['get', 'route_id'], route];
+      map.setFilter('route-highlight-casing', f);
+      map.setFilter('route-highlight', f);
+      map.setPaintProperty('routes', 'line-opacity', 0.12);   // fade the rest
     },
   });
 
@@ -171,7 +181,10 @@ export default function LiveMap() {
     handler: () => {
       const map = mapRef.current;
       if (map?.getLayer('route-highlight')) {
-        map.setFilter('route-highlight', ['==', ['get', 'route_id'], NO_ROUTE]);
+        const none: maplibregl.FilterSpecification = ['==', ['get', 'route_id'], NO_ROUTE];
+        map.setFilter('route-highlight-casing', none);
+        map.setFilter('route-highlight', none);
+        map.setPaintProperty('routes', 'line-opacity', 0.85);   // un-dim
       }
       pinsRef.current.forEach((m) => m.remove());
       pinsRef.current = [];
