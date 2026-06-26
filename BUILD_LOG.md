@@ -851,3 +851,65 @@ api`, then do an MAE split-by-hour eval. User asked to be reminded next session.
 ### Next step
 Phase 6 **Concept Check**, then continue building (Phase 7 observability, or 8/9) while data
 collects. Retrain tomorrow.
+
+---
+
+## Entry 23 — Phase 6 Concept Check + Phase 7a: Prometheus metrics
+**Date:** 2026-06-26
+**Phase:** Phase 6 → 7
+
+### Phase 6 Concept Check — PASSED
+Regression (continuous delay) ✓; time-split because delays are autocorrelated → random split leaks
+near-in-time samples into both sets ✓; leakage avoided in BOTH features (only past-knowable) AND
+split (time-based) — user had split, added feature half ✓; baselines needed to interpret 44s,
+persistence was the hard one (corr 0.95) ✓.
+
+### Concept taught (Phase 7)
+- Logs (events, text) vs metrics (numbers over time). Prometheus SCRAPES /metrics; Grafana draws
+  dashboards. Counter (up-only) / Gauge (up-down) / Histogram (distribution → p50/p99).
+
+### What we did (7a)
+- `backend/app/core/metrics.py`: shared Counter/Gauge/Histogram defs (+ worker metrics ports).
+- Poller: `start_http_server(9101)`; POLLS, POSITIONS_PUBLISHED, POLL_FAILURES, FEED_TS (newest
+  vehicle ts → freshness).
+- Processor: `start_http_server(9102)`; MESSAGES, BATCHES.
+- API: `/metrics` route (generate_latest), latency middleware labeled by ROUTE TEMPLATE (low
+  cardinality — avoids the stop-id explosion), WS_CLIENTS gauge.
+- `prometheus-client==0.24.1` dep; `ops/prometheus.yml` (scrape api:8000, poller:9101,
+  processor:9102 @10s); `prometheus` compose service on :9090.
+- Verified: all 3 targets UP; positions_published=137=messages (balanced); ws_clients=1;
+  feed_age≈21s. Committed `024ccc6`.
+- Note: shared metrics module → every process exposes all metric names (0 for ones it doesn't
+  use); filter by `job` in Grafana.
+
+### Next step
+**Phase 7, Sub-step 7b:** Grafana (provisioned datasource + dashboard) on :3001 (3000 is Martin);
+panels for ingestion rate, feed age, WS clients, API p50/p99, poll failures. Screenshot for README.
+Then Phase 7 Concept Check.
+
+---
+
+## Entry 24 — Phase 7, Sub-step 7b + alerts: Grafana dashboard; PHASE 7 COMPLETE
+**Date:** 2026-06-26
+**Phase:** Phase 7 (observability)
+
+### What we did
+- **Grafana** provisioned-as-code: `ops/grafana/provisioning/datasources/datasource.yml`
+  (Prometheus, uid=prometheus), `.../dashboards/provider.yml`, and
+  `ops/grafana/dashboards/livetransit.json` (6 panels: ingestion events/sec, feed age stat w/
+  thresholds, WS clients, API p50/p99 via histogram_quantile, poll failures, positions total).
+- compose `grafana` service on **:3001** (3000=Martin), anonymous Viewer enabled (no login).
+- **Alerts**: `ops/alerts.yml` — `FeedStale` (feed >60s) + `ProcessorStalled` (publishing but not
+  consuming 2m); `rule_files` in prometheus.yml; mounted. Both load **inactive** (healthy).
+- Verified via API: datasource + dashboard provisioned; **user confirmed** dashboard loads with
+  live data, feed age green, ingestion lines moving. Commits `46239c3`, `c35fd79`.
+- TODO (Part 6 polish): screenshot the dashboard for the README (user action).
+
+### Phase 7 status: ✅ COMPLETE (pending Concept Check).
+Observability: /metrics on all services → Prometheus (:9090, scrape 10s, 2 alert rules) → Grafana
+(:3001 dashboard). Stack now 8 services.
+
+### Next step
+Phase 7 **Concept Check** (logs vs metrics; counter/gauge/histogram; p99 & why over average).
+Then continue — likely **Phase 8** (pytest: dedupe/idempotency, arrival detection, feature build,
+API contract) and/or **Phase 9** (CI/CD), while data collects for tomorrow's retrain.
