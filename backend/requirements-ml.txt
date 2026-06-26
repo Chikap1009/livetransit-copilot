@@ -1,0 +1,5 @@
+# ML training/serving dependencies (heavier; separate from the core backend).
+# Install:  .venv\Scripts\python.exe -m pip install -r backend/requirements-ml.txt
+pandas==3.0.3
+lightgbm==4.6.0
+scikit-learn==1.9.0
