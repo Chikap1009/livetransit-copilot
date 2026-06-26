@@ -12,4 +12,4 @@ redis==6.4.0
 h3==4.5.0
 lightgbm==4.6.0
 prometheus-client==0.24.1
-pydantic-ai-slim[google,ag-ui]==2.0.0
+pydantic-ai-slim[google,ag-ui,groq]==2.0.0
