@@ -8,6 +8,7 @@ from datetime import timedelta
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -78,6 +79,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)
+
+# Allow the Next.js dev frontend (a different origin) to call the API/SSE.
+# Dev-permissive; tighten to specific origins in production (Phase J).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve the minimal live-map page at /web (same origin as the API -> no CORS for the WS).
 app.mount("/web", StaticFiles(directory="frontend", html=True), name="web")
