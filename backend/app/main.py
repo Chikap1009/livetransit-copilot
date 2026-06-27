@@ -1,5 +1,6 @@
 """FastAPI app: REST endpoints over the live transit data."""
 import asyncio
+import hashlib
 import json
 import sys
 import time
@@ -9,7 +10,7 @@ from datetime import timedelta
 import redis.asyncio as redis
 from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg.rows import dict_row
@@ -129,19 +130,50 @@ class AskRequest(BaseModel):
     thread_id: str | None = None   # pass to get conversation memory (Redis-backed)
 
 
+# Phase H (pulled forward): short-TTL answer cache so repeated questions don't re-hit
+# the LLM (saves scarce free-tier quota). Short TTL bounds staleness for live-data answers.
+AGENT_CACHE_TTL = 90
+
+
+def _answer_cache_key(user_id: str, question: str) -> str:
+    digest = hashlib.sha256(question.strip().lower().encode()).hexdigest()[:16]
+    return f"agentans:{user_id}:{digest}"
+
+
 @app.post("/agent/ask")
 async def agent_ask(req: AskRequest):
     """Run the Copilot agent on an English question (ReAct loop over the live tools).
 
-    If thread_id is given, prior turns are loaded from Redis as conversation memory
-    and the new turn is saved back.
+    Caching: stateless questions (no thread_id) reuse a recent identical answer.
+    Conversation: with thread_id, prior turns load from Redis and the new turn is saved.
+    Degradation: if every model in the fallback chain fails (free-tier exhausted), return a
+    clean "at capacity" message instead of a raw error.
     """
+    cache_key = _answer_cache_key(DEMO_USER, req.question) if not req.thread_id else None
+    if cache_key:
+        cached = await rds.get(cache_key)
+        if cached is not None:
+            return {**json.loads(cached), "cached": True}
+
     history = (
         await conversation.load_history(rds, DEMO_USER, req.thread_id) if req.thread_id else []
     )
-    result = await copilot.run(
-        req.question, deps=Deps(pool=pool), message_history=history, usage_limits=USAGE_LIMITS,
-    )
+    try:
+        result = await copilot.run(
+            req.question, deps=Deps(pool=pool), message_history=history, usage_limits=USAGE_LIMITS,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "answer_type": "Error",
+                "answer": {"summary": "The assistant is temporarily at capacity (free-tier "
+                                      "limit). Please try again in a moment."},
+                "tools_used": [],
+                "error": type(exc).__name__,
+            },
+        )
+
     tools_used = [
         part.tool_name
         for msg in result.all_messages()
@@ -149,14 +181,18 @@ async def agent_ask(req: AskRequest):
         # only tool *calls*, excluding Pydantic AI's internal "final_result_*" output tool
         if isinstance(part, ToolCallPart) and not part.tool_name.startswith("final_result")
     ]
-    if req.thread_id:
-        answer_text = getattr(result.output, "summary", None) or str(result.output)
-        await conversation.save_turn(rds, DEMO_USER, req.thread_id, req.question, answer_text)
-    return {
-        "answer_type": type(result.output).__name__,
-        "answer": result.output,        # a validated Pydantic object
+    output = result.output
+    response = {
+        "answer_type": type(output).__name__,
+        "answer": output.model_dump() if hasattr(output, "model_dump") else output,
         "tools_used": tools_used,
     }
+    if req.thread_id:
+        answer_text = getattr(output, "summary", None) or str(output)
+        await conversation.save_turn(rds, DEMO_USER, req.thread_id, req.question, answer_text)
+    elif cache_key and "remember" not in tools_used:   # don't cache memory-writes
+        await rds.set(cache_key, json.dumps(response, default=str), ex=AGENT_CACHE_TTL)
+    return response
 
 
 def _sse(event: str, data: dict) -> str:

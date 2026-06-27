@@ -1333,3 +1333,40 @@ Phase E **Concept Check** (plain vs agentic/corrective RAG; chunk→embed→retr
 prompt-injection defense). Then **Phase F** (Network Watchdog — background multi-agent anomaly
 detection + incident reports, supervisor/worker). Pending (after all phases): model retrain +
 agent eval pass.
+
+---
+
+## Entry 33 — Phase H (partial, pulled forward, part 1): response caching + graceful degradation
+**Date:** 2026-06-27
+**Phase:** Phase H slice (rate-limit/cost engineering) — brought forward to relieve free-tier pain
+
+### Why now (Phase E Concept Check PASSED first — all 3 correct)
+Heavy same-day testing of D + E exhausted Gemini's free daily quota; the chain then falls to Groq,
+whose Llama emits tool calls as `<function=name,{args}</function>` TEXT that can't be parsed → the
+chat shows "tool call validation failed". Root cause = free-tier exhaustion + Groq being unreliable
+for our many-tool agent. User chose to "bring part of Phase H forward" rather than just swap keys.
+
+### What we did (no new accounts needed)
+- **Response caching** (`/agent/ask`): short-TTL (90s) Redis cache keyed by
+  `agentans:{user}:{sha256(question)[:16]}`. Stateless questions (no thread_id) reuse a recent
+  identical answer → **no LLM call on repeats** (saves scarce quota). Don't cache memory-writes
+  (skip if `remember` in tools_used) or threaded/conversational calls. Short TTL bounds staleness
+  for live-data answers. Returns `cached: true` on a hit.
+- **Graceful degradation** (`/agent/ask`): wrap `copilot.run` in try/except → on total
+  fallback-chain failure return a clean 503 "assistant temporarily at capacity (free-tier limit)"
+  instead of a raw model/validation error.
+
+### Verified
+- Asked "What are the MBTA fares for the subway?" twice → 1st hit the LLM (tools `search_docs`),
+  2nd returned `cached=True` from Redis (`agentans:demo:b7508c51...`) with no model call.
+- Degradation path returns the friendly 503 when models fail.
+- ruff clean; api rebuilt.
+
+### Still TODO for the chat (part 2): the chat uses the streaming AG-UI path, which caching here
+does NOT cover; its real fix is **reliable extra capacity** (Llama providers mangle our tools, so
+this needs a key): either a fresh-PROJECT Gemini key (separate quota) or OpenRouter. Gateway to be
+made config-driven from available keys. (Full Phase H later also adds Langfuse tracing, per-user
+rate limiting, request queue.)
+
+### Next step
+Wire the reliable provider once the user supplies a key, then resume **Phase F** (Watchdog).
