@@ -19,6 +19,15 @@ class ArrivalAnswer(BaseModel):
     summary: str
 
 
+class IncidentReport(BaseModel):
+    """The Watchdog's structured finding about a detected anomaly."""
+    kind: str = Field(description="'bunching', 'delay', or 'gap'.")
+    route_id: str | None = Field(None, description="The affected MBTA route, if any.")
+    severity: str = Field(description="'low', 'medium', or 'high'.")
+    summary: str = Field(description="One or two sentences a rider would understand.")
+    likely_cause: str = Field(description="The most plausible cause, given the evidence.")
+
+
 class Answer(BaseModel):
     """Use for any other transit question (positions, alerts, general info)."""
     summary: str = Field(description="The natural-language answer.")

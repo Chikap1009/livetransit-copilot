@@ -29,3 +29,9 @@ POLL_INTERVAL_SECONDS = float(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
 
 # H3 hexagon resolution for tagging positions (8 ≈ 0.74 km^2, neighborhood-sized).
 H3_RESOLUTION = int(os.environ.get("H3_RESOLUTION", "8"))
+
+# --- Network Watchdog (Phase F) ---
+# Background anomaly-monitoring loop is OFF by default (it uses LLM quota). Enable with
+# WATCHDOG_ENABLED=true; it then runs every WATCHDOG_INTERVAL_SECONDS.
+WATCHDOG_ENABLED = os.environ.get("WATCHDOG_ENABLED", "false").lower() in ("1", "true", "yes")
+WATCHDOG_INTERVAL_SECONDS = int(os.environ.get("WATCHDOG_INTERVAL_SECONDS", "900"))

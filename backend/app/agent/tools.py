@@ -13,6 +13,37 @@ from backend.app.ml import predictor
 MBTA_ALERTS_URL = "https://cdn.mbta.com/realtime/Alerts.pb"
 RECENT = "90 seconds"
 
+# Boston, for the weather tool (Open-Meteo, no key).
+BOSTON_LAT, BOSTON_LON = 42.3601, -71.0589
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+# Minimal WMO weather-code → words map for the codes we care about.
+_WMO = {
+    0: "clear", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+    45: "fog", 48: "rime fog", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle",
+    61: "light rain", 63: "rain", 65: "heavy rain", 71: "light snow", 73: "snow",
+    75: "heavy snow", 77: "snow grains", 80: "rain showers", 81: "rain showers",
+    82: "violent rain showers", 85: "snow showers", 86: "heavy snow showers",
+    95: "thunderstorm", 96: "thunderstorm with hail", 99: "thunderstorm with heavy hail",
+}
+
+
+async def get_weather() -> dict:
+    """Current Boston weather (Open-Meteo, no key) — for reasoning about delays."""
+    params = {
+        "latitude": BOSTON_LAT, "longitude": BOSTON_LON,
+        "current": "temperature_2m,precipitation,weather_code,wind_speed_10m",
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(OPEN_METEO_URL, params=params, timeout=15)
+        resp.raise_for_status()
+    cur = resp.json().get("current", {})
+    return {
+        "temperature_c": cur.get("temperature_2m"),
+        "precipitation_mm": cur.get("precipitation"),
+        "wind_kmh": cur.get("wind_speed_10m"),
+        "conditions": _WMO.get(cur.get("weather_code"), "unknown"),
+    }
+
 
 async def get_vehicle_positions(pool: AsyncConnectionPool, route: str, limit: int = 25) -> dict:
     """Latest position of each vehicle currently running a route."""

@@ -18,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic_ai.messages import ToolCallPart
 
-from backend.app.agent import conversation, rag
+from backend.app.agent import conversation, rag, watchdog
 from backend.app.agent.copilot import Deps, copilot
 from backend.app.agent.gateway import USAGE_LIMITS
 from backend.app.core import config, metrics
@@ -77,9 +77,12 @@ async def lifespan(app: FastAPI):
         print(f"ETA model not loaded: {exc}")
     task = asyncio.create_task(broadcaster())
     rag_task = asyncio.create_task(_refresh_rag())  # populate/refresh RAG library (non-blocking)
+    bg = [task, rag_task]
+    if config.WATCHDOG_ENABLED:
+        bg.append(asyncio.create_task(_watchdog_loop()))
     yield
-    task.cancel()
-    rag_task.cancel()
+    for t in bg:
+        t.cancel()
     await rds.aclose()
     await pool.close()
 
@@ -91,6 +94,18 @@ async def _refresh_rag():
         print(f"RAG library ingested: {counts}")
     except Exception as exc:
         print(f"RAG ingestion skipped: {exc}")
+
+
+async def _watchdog_loop():
+    """Periodically run the Network Watchdog (only when WATCHDOG_ENABLED)."""
+    while True:
+        await asyncio.sleep(config.WATCHDOG_INTERVAL_SECONDS)
+        try:
+            created = await watchdog.run_once(pool)
+            if created:
+                print(f"Watchdog logged {len(created)} incident(s)")
+        except Exception as exc:
+            print(f"Watchdog run failed: {exc}")
 
 
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)
@@ -230,6 +245,24 @@ async def agent_ag_ui(request: Request):
         output_type=str,           # natural-language chat (override the structured output)
         usage_limits=USAGE_LIMITS,
     )
+
+
+@app.get("/incidents")
+async def list_incidents(limit: int = 20):
+    """Recent Watchdog incident reports (newest first)."""
+    rows = await fetch(
+        "SELECT id, kind, route_id, severity, summary, created_at "
+        "FROM incidents ORDER BY created_at DESC LIMIT %s",
+        (limit,),
+    )
+    return {"incidents": rows}
+
+
+@app.post("/watchdog/run")
+async def watchdog_run():
+    """Manually trigger one Watchdog pass (detect anomalies, investigate, log incidents)."""
+    created = await watchdog.run_once(pool)
+    return {"created": created}
 
 
 async def cached_json(key: str, ttl: int, compute):

@@ -1404,3 +1404,58 @@ Phase H later: Langfuse tracing, per-user rate limiting, request queue, chat-pat
 
 ### Next step
 User tests Phase E with 2 tough prompts on the chat, then **Phase F** (Network Watchdog).
+
+---
+
+## Entry 35 — Phase F: the Network Watchdog (multi-agent, supervisor/worker); PHASE F COMPLETE
+**Date:** 2026-06-27
+**Phase:** Phase F (multi-agent orchestration)
+
+### Concepts taught (2B.8)
+- **Multi-agent**: a SECOND agent nobody chats with, running in the background.
+- **Supervisor/worker** (ours): the Copilot (supervisor) delegates an investigation to the Watchdog
+  (worker). Contrasted with **planner–executor** (one plans, one executes), **reflection** (an agent
+  critiques its own output), **evaluator–optimizer** (one proposes, one scores/improves).
+- **The cost discipline**: detection must be cheap (no LLM); only a genuine anomaly triggers the
+  LLM investigation. That split keeps a frequently-running Watchdog affordable.
+
+### What we did
+- **F1** `0014_incidents.sql`: `incidents(id, kind, route_id, severity, summary, evidence, fingerprint,
+  created_at)` + recent/dedup indexes. **`anomalies.py`** (pure SQL, no LLM): bunching (BUS routes
+  only — `route_type=3`, closest same-route pair within 200 m; rail "bunching" excluded as terminal/
+  coupled-car noise), delays (running trips >10 min late from vehicle_arrivals), gaps (a rail line
+  with no vehicles in 2 min during NY service hours 6–22).
+- **F2** `watchdog.py`: a SECOND Pydantic AI agent (`output_type=IncidentReport`, tight
+  `request_limit=4`) with `get_service_alerts` + a new no-key `get_weather` (Open-Meteo) tool. Given
+  one anomaly it investigates and writes a report. `run_once(pool, max_incidents=3)`: detect →
+  skip anomalies already logged in the last 20 min (dedup by kind/route/fingerprint) → investigate →
+  store. IncidentReport schema added (kind/route/severity/summary/likely_cause). `get_weather` in
+  tools.py (WMO code → words).
+- **F3 supervisor delegation**: `investigate_route(route)` tool on the Copilot → detects anomalies on
+  that route and runs `watchdog.investigate` → Copilot relays the report. System prompt updated.
+- **F4** `GET /incidents` + `POST /watchdog/run` (manual trigger); **frontend `IncidentsPanel.tsx`**
+  (polls /incidents every 30s, severity-colored, collapsible, bottom-left) mounted in AppShell.
+- **F5** env-gated background loop (`_watchdog_loop` in lifespan; `WATCHDOG_ENABLED` default false,
+  `WATCHDOG_INTERVAL_SECONDS` default 900) so it never burns quota unless switched on. config.py +
+  docker-compose.yml wired.
+
+### How it was verified
+- Detection (quota-free): 13 candidates (8 bus bunching 13–46 m, 5 real delays 33–47 min).
+- `POST /watchdog/run` → created 3 incidents; the Watchdog **actually investigated**: route 109
+  cause = "construction closure on Washington St" (it called get_service_alerts and matched a real
+  alert), route 111 = checked alerts+weather ("no disruptions or adverse weather"). `/incidents`
+  serves them newest-first.
+- **Delegation**: `/agent/ask` "have the watchdog investigate route 1" → tools_used
+  `["investigate_route"]` → relayed the Watchdog's bunching report. Supervisor/worker confirmed.
+- ruff clean; `tsc --noEmit` clean; api rebuilt.
+
+### Note
+Multi-key Gemini rotation (Entry 34) held up across all this testing — no manual key swaps needed.
+
+### Phase F status: ✅ COMPLETE. Two agents: Copilot (you talk to) + Watchdog (background). Incidents
+panel live in the UI. Background loop available but OFF by default.
+
+### Next step
+Phase F **Concept Check** (supervisor/worker vs planner-executor/reflection/evaluator-optimizer; how
+the two agents share tools/state safely). Then **Phase G** (evals — golden set + LLM-as-judge +
+trajectory checks). Pending (after all phases): model retrain + agent eval pass.
