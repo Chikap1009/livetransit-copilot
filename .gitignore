@@ -43,3 +43,6 @@ dist/
 Thumbs.db
 .idea/
 *.log
+
+# --- Eval harness checkpoint (regenerable) ---
+backend/app/evals/_progress.json
