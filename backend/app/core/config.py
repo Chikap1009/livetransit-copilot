@@ -35,3 +35,8 @@ H3_RESOLUTION = int(os.environ.get("H3_RESOLUTION", "8"))
 # WATCHDOG_ENABLED=true; it then runs every WATCHDOG_INTERVAL_SECONDS.
 WATCHDOG_ENABLED = os.environ.get("WATCHDOG_ENABLED", "false").lower() in ("1", "true", "yes")
 WATCHDOG_INTERVAL_SECONDS = int(os.environ.get("WATCHDOG_INTERVAL_SECONDS", "900"))
+
+# --- Agent rate limiting (Phase H) ---
+# Max agent requests per minute per client IP (a public free-tier agent must not let one
+# user drain the quota). 0 disables the limit.
+AGENT_RATE_LIMIT_PER_MIN = int(os.environ.get("AGENT_RATE_LIMIT_PER_MIN", "20"))

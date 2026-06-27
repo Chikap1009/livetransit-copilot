@@ -14,3 +14,4 @@ lightgbm==4.6.0
 prometheus-client==0.24.1
 pydantic-ai-slim[google,ag-ui,groq]==2.0.0
 fastembed==0.8.0          # local CPU/ONNX text embeddings for agent memory (Phase D)
+logfire==4.37.0           # OpenTelemetry tracing -> Langfuse (Phase H)

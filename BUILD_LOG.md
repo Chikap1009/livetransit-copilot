@@ -1569,3 +1569,48 @@ phases meanwhile. Also: **keep checking CI stays green** after each push.
 ### Next step
 **Phase H** (full): Langfuse tracing + remaining cost/rate-limit work. Pending: retrain + full
 eval pass (both need fresh quota; resume-capable now).
+
+---
+
+## Entry 39 — Phase H: Langfuse tracing + per-IP rate limiting
+**Date:** 2026-06-28
+**Phase:** Phase H (tracing + cost/rate-limit engineering)
+
+### Concepts taught (2B.12-14)
+- **Tracing** ≠ Prometheus/Grafana metrics: a nested, replayable timeline of EVERY agent step
+  (each model call, tool call, retrieval) with inputs/outputs/timing/tokens — the agent's
+  black-box recorder, for debugging *why* it did something. Langfuse ingests OpenTelemetry, and
+  Pydantic AI emits OTel spans, so instrumenting is wiring an exporter, not rewriting the agent.
+- Cost/rate-limit engineering (mostly shipped earlier): caching, multi-key fallback (config not
+  code), graceful degradation, tool-call depth cap. Remaining piece = per-user rate limiting.
+
+### What we did
+- **H1 Langfuse tracing** — `agent/tracing.py::configure_tracing()`: base64 the public:secret keys
+  into an OTLP `Authorization: Basic` header, point `OTEL_EXPORTER_OTLP_ENDPOINT` at
+  `{LANGFUSE_BASE_URL}/api/public/otel`, then `logfire.configure(send_to_logfire=False)` +
+  `logfire.instrument_pydantic_ai()`. **No-op if LANGFUSE keys absent** (app still runs). Called
+  at API startup. Dep: `logfire==4.37.0` (bumped protobuf 6.x / otel 1.42 — verified GTFS protobuf
+  + agent still work). Keys in git-ignored `.env`; passed to api via compose.
+- **H2 per-IP rate limiting** — `_rate_limited(request)` in main.py: Redis fixed-window INCR
+  (`rl:agent:{ip}:{minute}`, 60s expiry), `AGENT_RATE_LIMIT_PER_MIN` (default 20, 0=off). Applied
+  to /agent/ask, /agent/ag-ui, /agent/stream, /watchdog/run → clean 429 when exceeded.
+- Request queue: deferred (rate limiter + degradation cover burst protection; optional polish).
+
+### Verified
+- Startup log: "Agent tracing -> Langfuse enabled"; LANGFUSE env present in container; a logfire
+  self-test span emitted without error.
+- Rate limit: 25 rapid POSTs to /agent/ask → 20 passed the limiter (1×200 cached + 19×503 quota
+  degradation), **5×429** over the cap. Exactly the 20/min limit.
+- ruff clean; api rebuilt + healthy.
+
+### Pending verification (needs a successful agent run = fresh quota)
+Open the Langfuse dashboard (cloud.langfuse.com) and confirm a real run shows nested model/tool
+spans (H3: watch a trace, spot an inefficiency). All 4 Gemini keys still exhausted today.
+
+### Phase H status: ✅ tracing + rate limiting done (+ caching/fallback/degradation/depth-cap from
+earlier). Trace-watching (H3) pending fresh quota. Optional request queue deferred.
+
+### Next step
+Phase H **Concept Check** (tracing vs logs/metrics; what to cache + staleness; fallback as config;
+why public agents need rate limiting). Then **Phase I** (MCP server) or **Phase 7-9 already done** →
+**Phase J** (deploy). Pending: retrain + full eval pass + watch a Langfuse trace (all need quota/data).

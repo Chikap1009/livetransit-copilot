@@ -18,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic_ai.messages import ToolCallPart
 
-from backend.app.agent import conversation, rag, watchdog
+from backend.app.agent import conversation, rag, tracing, watchdog
 from backend.app.agent.copilot import Deps, copilot
 from backend.app.agent.gateway import USAGE_LIMITS
 from backend.app.core import config, metrics
@@ -68,6 +68,8 @@ async def broadcaster():
 async def lifespan(app: FastAPI):
     """Open the DB pool + Redis client and start the broadcaster at startup."""
     global pool, rds
+    if tracing.configure_tracing():   # Langfuse OTel tracing (no-op without keys)
+        print("Agent tracing -> Langfuse enabled")
     pool = AsyncConnectionPool(config.DATABASE_URL, min_size=1, max_size=5, open=False)
     await pool.open()
     rds = redis.from_url(config.REDIS_URL, decode_responses=True)
@@ -155,15 +157,36 @@ def _answer_cache_key(user_id: str, question: str) -> str:
     return f"agentans:{user_id}:{digest}"
 
 
+async def _rate_limited(request: Request) -> bool:
+    """Per-IP fixed-window limiter on the agent endpoints (Redis INCR + 60s expiry)."""
+    if config.AGENT_RATE_LIMIT_PER_MIN <= 0:
+        return False
+    ip = request.client.host if request.client else "unknown"
+    key = f"rl:agent:{ip}:{int(time.time() // 60)}"
+    count = await rds.incr(key)
+    if count == 1:
+        await rds.expire(key, 60)
+    return count > config.AGENT_RATE_LIMIT_PER_MIN
+
+
+_RATE_LIMIT_RESPONSE = JSONResponse(
+    status_code=429,
+    content={"answer_type": "Error", "tools_used": [],
+             "answer": {"summary": "Too many requests — please slow down and try again shortly."}},
+)
+
+
 @app.post("/agent/ask")
-async def agent_ask(req: AskRequest):
+async def agent_ask(req: AskRequest, request: Request):
     """Run the Copilot agent on an English question (ReAct loop over the live tools).
 
-    Caching: stateless questions (no thread_id) reuse a recent identical answer.
-    Conversation: with thread_id, prior turns load from Redis and the new turn is saved.
-    Degradation: if every model in the fallback chain fails (free-tier exhausted), return a
-    clean "at capacity" message instead of a raw error.
+    Rate-limited per IP. Caching: stateless questions (no thread_id) reuse a recent
+    identical answer. Conversation: with thread_id, prior turns load from Redis and the new
+    turn is saved. Degradation: if every model fails (free-tier exhausted), return a clean
+    "at capacity" message instead of a raw error.
     """
+    if await _rate_limited(request):
+        return _RATE_LIMIT_RESPONSE
     cache_key = _answer_cache_key(DEMO_USER, req.question) if not req.thread_id else None
     if cache_key:
         cached = await rds.get(cache_key)
@@ -215,8 +238,11 @@ def _sse(event: str, data: dict) -> str:
 
 
 @app.get("/agent/stream")
-async def agent_stream(q: str):
+async def agent_stream(q: str, request: Request):
     """Stream the agent's tool steps (live) then the final structured answer, over SSE."""
+    if await _rate_limited(request):
+        return _RATE_LIMIT_RESPONSE
+
     async def gen():
         async with copilot.iter(q, deps=Deps(pool=pool), usage_limits=USAGE_LIMITS) as run:
             async for node in run:
@@ -236,6 +262,8 @@ async def agent_stream(q: str):
 @app.post("/agent/ag-ui")
 async def agent_ag_ui(request: Request):
     """AG-UI protocol endpoint (text output) — what CopilotKit connects to."""
+    if await _rate_limited(request):
+        return _RATE_LIMIT_RESPONSE
     from pydantic_ai.ui.ag_ui import AGUIAdapter
 
     return await AGUIAdapter.dispatch_request(
@@ -259,8 +287,10 @@ async def list_incidents(limit: int = 20):
 
 
 @app.post("/watchdog/run")
-async def watchdog_run():
+async def watchdog_run(request: Request):
     """Manually trigger one Watchdog pass (detect anomalies, investigate, log incidents)."""
+    if await _rate_limited(request):
+        return _RATE_LIMIT_RESPONSE
     created = await watchdog.run_once(pool)
     return {"created": created}
 

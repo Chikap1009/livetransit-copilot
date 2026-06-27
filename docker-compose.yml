@@ -56,6 +56,10 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY}
       WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-false}        # background Watchdog loop (off by default)
       WATCHDOG_INTERVAL_SECONDS: ${WATCHDOG_INTERVAL_SECONDS:-900}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}       # agent tracing (no-op if unset)
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
+      AGENT_RATE_LIMIT_PER_MIN: ${AGENT_RATE_LIMIT_PER_MIN:-20}
     ports:
       - "8000:8000"
     volumes:
