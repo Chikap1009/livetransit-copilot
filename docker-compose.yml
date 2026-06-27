@@ -53,6 +53,7 @@ services:
       GEMINI_API_KEY_2: ${GEMINI_API_KEY_2:-}   # extra Gemini keys = backup tiers
       GEMINI_API_KEY_3: ${GEMINI_API_KEY_3:-}
       GEMINI_API_KEY_4: ${GEMINI_API_KEY_4:-}
+      GEMINI_API_KEY_5: ${GEMINI_API_KEY_5:-}
       GROQ_API_KEY: ${GROQ_API_KEY}
       WATCHDOG_ENABLED: ${WATCHDOG_ENABLED:-false}        # background Watchdog loop (off by default)
       WATCHDOG_INTERVAL_SECONDS: ${WATCHDOG_INTERVAL_SECONDS:-900}

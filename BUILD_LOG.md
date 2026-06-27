@@ -1603,12 +1603,15 @@ eval pass (both need fresh quota; resume-capable now).
   degradation), **5×429** over the cap. Exactly the 20/min limit.
 - ruff clean; api rebuilt + healthy.
 
-### Pending verification (needs a successful agent run = fresh quota)
-Open the Langfuse dashboard (cloud.langfuse.com) and confirm a real run shows nested model/tool
-spans (H3: watch a trace, spot an inefficiency). All 4 Gemini keys still exhausted today.
+### H3 trace-watching — VERIFIED
+User supplied a 5th Gemini key (GEMINI_API_KEY_5; keys 1-4 still daily-exhausted, so the chain
+funnels through them to key5). One query "Where are the Red Line trains?" → succeeded
+(get_vehicle_positions, 11 trains). Confirmed via the Langfuse REST API
+(`GET /api/public/traces`, Basic auth): a **"copilot run" trace with 4 nested observations**
+(agent run → model call → tool span → final model call). Tracing works end to end.
 
-### Phase H status: ✅ tracing + rate limiting done (+ caching/fallback/degradation/depth-cap from
-earlier). Trace-watching (H3) pending fresh quota. Optional request queue deferred.
+### Phase H status: ✅ COMPLETE. Langfuse tracing VERIFIED (nested model/tool spans) + per-IP rate
+limiting + caching/fallback/degradation/depth-cap. Optional request queue deferred.
 
 ### Next step
 Phase H **Concept Check** (tracing vs logs/metrics; what to cache + staleness; fallback as config;
