@@ -24,3 +24,7 @@ class Answer(BaseModel):
     summary: str = Field(description="The natural-language answer.")
     routes: list[str] = Field(default_factory=list, description="MBTA routes referenced.")
     facts: list[str] = Field(default_factory=list, description="Concrete supporting data points.")
+    sources: list[str] = Field(
+        default_factory=list,
+        description="Titles of any policy/alert documents cited (from search_docs).",
+    )

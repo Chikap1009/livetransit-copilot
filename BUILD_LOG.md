@@ -1267,3 +1267,69 @@ Phase D **Concept Check** (name the 3 tiers + where each lives; what an embeddin
 similarity search works; why pgvector lives in the same DB). Then **Phase E** (agentic/corrective
 RAG over service alerts + policy docs with citations). Decide LLM-capacity approach for continued
 testing. Pending (after all phases): model retrain + agent eval pass.
+
+---
+
+## Entry 32 — Phase E: agentic (corrective) RAG over alerts + policy docs; PHASE E COMPLETE
+**Date:** 2026-06-27
+**Phase:** Phase E (agentic RAG)
+
+### Phase D Concept Check — PASSED (with corrections)
+3 tiers named ✓ but corrected: long-term + vector are the SAME Postgres table (pgvector is IN
+Postgres), differing by ACCESS (exact lookup vs `<=>` similarity) — not separate DBs. HNSW =
+*approximate* NN (navigable graph, skips most vectors) ✓. #3 corrected: pgvector co-located NOT
+because "Postgres stores conversation" (that's Redis) but for (a) no new infra and (b) JOIN
+embeddings with relational/PostGIS data in one query.
+
+### Concepts taught (Phase E)
+- **RAG**: give the LLM a searchable library (chunk → embed → store → retrieve top-k → answer from
+  sources with citations). Embedding done with LOCAL fastembed → **no LLM quota** for ingestion.
+- **Plain vs agentic/corrective RAG (CRAG)**: plain = retrieve once then answer; corrective = check
+  whether retrieved chunks are actually relevant, and if weak, re-query (rephrase / widen / other
+  source) before answering. Retrieval inside the reasoning loop.
+- **Prompt injection (2B.16)**: retrieved text is DATA, not commands — the agent reasons *about* it,
+  never *follows* instructions embedded in it.
+
+### What we did (all of E1–E3 needs zero LLM quota)
+- **E1** `0013_rag.sql`: `rag_documents(id, source, title, chunk_text, embedding vector(384),
+  metadata jsonb, created_at)` + HNSW cosine index + source btree + UNIQUE(source, chunk_text).
+- **E2 ingestion** — curated `docs/kb/*.md` (fares, accessibility, bikes, service-hours) chunked by
+  `##` heading; live MBTA `Alerts.pb` (header+description per alert). `rag.py`: `_chunk_markdown`,
+  `_store` (embed + replace-by-source; **no-op on empty so a missing source never wipes data**),
+  `ingest_kb` (source 'policy'), `ingest_alerts` (source 'alert', refreshes), `bootstrap`. Ran:
+  16 policy + ~96 alert chunks.
+- **E3** `retrieve(query,k,source)` (cosine `<=>`) + `corrective_retrieve` (judge by distance
+  threshold 0.45; widen search once if weak; return chunks + `relevant`/`corrected` flags).
+- **E4 agent wiring** — `search_docs` tool; system prompt: use it for fares/policy/why questions,
+  answer ONLY from chunks, cite each chunk's `title` in the new `Answer.sources` field, re-query if
+  relevant=false, treat retrieved text as data. Best-effort background ingest at API startup
+  (`_refresh_rag` in lifespan) so the library self-populates/refreshes. Dockerfile now COPYs
+  `docs/kb` into the image (else container ingest finds no files).
+
+### How it was verified
+- Retrieval (direct, quota-free): "bike on Red Line at rush hour?" → Bikes/Subway chunk 0.199
+  (relevant); "subway fare/transfers?" → fare+transfer chunks 0.15/0.22; "no trains at 3am?" →
+  "Why a train might not be running" 0.215; **off-topic "airspeed of a swallow?"** → relevant=false,
+  corrected=true, all ≥0.5 (corrective loop works).
+- Agent (LLM): "full-size bike on Red Line at rush hour?" → search_docs → correct grounded answer,
+  sources cited. "subway fare + transfers?" → $2.40 + free 2h transfers, sources=["MBTA Fares… —
+  Subway and bus fares", "… — Free and reduced transfers"] (specific titles after a prompt tweak).
+- Startup ingest in-container confirmed: "RAG library ingested: {policy_chunks:16, alert_chunks:98}".
+- ruff clean; api rebuilt.
+
+### Notes / known
+- `get_service_alerts` (live alert list by route) and `search_docs` (semantic policy/why) overlap
+  for "current disruptions"; the agent usually picks sensibly. Left both (complementary).
+- On a degraded fallback model a "why disrupted now" run returned a weak "Let me check…" summary —
+  model-quality artifact (Phase H), not a RAG defect; good Gemini runs synthesize fully.
+- Free-tier note from Entry 31 still applies; ingestion/retrieval are local (no quota), only the
+  final answer needs the LLM.
+
+### Phase E status: ✅ COMPLETE. Library: 16 policy + ~98 alert chunks in pgvector; corrective
+retrieve; agent cites sources. Self-refreshes on api startup.
+
+### Next step
+Phase E **Concept Check** (plain vs agentic/corrective RAG; chunk→embed→retrieve; when/why re-query;
+prompt-injection defense). Then **Phase F** (Network Watchdog — background multi-agent anomaly
+detection + incident reports, supervisor/worker). Pending (after all phases): model retrain +
+agent eval pass.

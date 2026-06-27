@@ -17,8 +17,9 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 ENV FASTEMBED_CACHE=/app/.fastembed_cache
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/app/.fastembed_cache')"
 
-# Copy the application code.
+# Copy the application code + the RAG knowledge-base docs.
 COPY backend ./backend
+COPY docs/kb ./docs/kb
 
 # Default command (the API). Overridden by the poller service.
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

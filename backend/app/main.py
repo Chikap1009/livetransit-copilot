@@ -17,7 +17,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic_ai.messages import ToolCallPart
 
-from backend.app.agent import conversation
+from backend.app.agent import conversation, rag
 from backend.app.agent.copilot import Deps, copilot
 from backend.app.agent.gateway import USAGE_LIMITS
 from backend.app.core import config, metrics
@@ -75,10 +75,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"ETA model not loaded: {exc}")
     task = asyncio.create_task(broadcaster())
+    rag_task = asyncio.create_task(_refresh_rag())  # populate/refresh RAG library (non-blocking)
     yield
     task.cancel()
+    rag_task.cancel()
     await rds.aclose()
     await pool.close()
+
+
+async def _refresh_rag():
+    """Ingest policy docs + live alerts in the background so startup isn't blocked."""
+    try:
+        counts = await rag.bootstrap(pool)
+        print(f"RAG library ingested: {counts}")
+    except Exception as exc:
+        print(f"RAG ingestion skipped: {exc}")
 
 
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)

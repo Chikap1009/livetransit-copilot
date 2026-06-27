@@ -7,7 +7,7 @@ from google.transit import gtfs_realtime_pb2
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from backend.app.agent import routing
+from backend.app.agent import rag, routing
 from backend.app.ml import predictor
 
 MBTA_ALERTS_URL = "https://cdn.mbta.com/realtime/Alerts.pb"
@@ -77,6 +77,11 @@ async def predict_eta(pool: AsyncConnectionPool, stop_id: str) -> dict:
 async def plan_trip(pool: AsyncConnectionPool, origin: str, destination: str) -> dict:
     """Plan a trip between two stops by name (direct trip, or rail transfers)."""
     return await routing.plan_trip(pool, origin, destination)
+
+
+async def search_docs(pool: AsyncConnectionPool, query: str) -> dict:
+    """Search MBTA alerts + policy/reference docs for passages relevant to a query."""
+    return await rag.corrective_retrieve(pool, query)
 
 
 async def get_service_alerts(route: str | None = None) -> dict:
