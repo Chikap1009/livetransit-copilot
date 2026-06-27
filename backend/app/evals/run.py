@@ -53,7 +53,8 @@ async def main():
     global _pool
     from pydantic_evals import Dataset
 
-    from backend.app.evals.cases import GOLDEN, AnswerContains, ExpectedTools, NoError
+    from backend.app.evals.cases import GOLDEN
+    from backend.app.evals.evaluators import AnswerContains, ExpectedTools, NoError
 
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
     cases = GOLDEN[:limit] if limit else GOLDEN

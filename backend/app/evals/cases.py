@@ -9,50 +9,15 @@ We deliberately avoid asserting live numbers (positions/arrivals change); trajec
 and stable-fact checks are the robust signal.
 """
 import os
-from dataclasses import dataclass
 
 from pydantic_evals import Case
-from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
+from pydantic_evals.evaluators import LLMJudge
 
 from backend.app.agent.gateway import MODEL
 
 # The LLM judge adds a model call per judged case; opt in with EVAL_JUDGE=1 so routine
 # runs (trajectory + stable-fact checks) stay cheap on the free tier.
 _USE_JUDGE = os.environ.get("EVAL_JUDGE", "").lower() in ("1", "true", "yes")
-
-
-# --- custom evaluators -------------------------------------------------------
-@dataclass
-class ExpectedTools(Evaluator):
-    """Trajectory: did the run call the tool(s) the case expects?"""
-
-    def evaluate(self, ctx: EvaluatorContext) -> dict:
-        expected = (ctx.metadata or {}).get("expected_tools")
-        if not expected:
-            return {}
-        used = set(ctx.output.get("tools_used", []))
-        return {"expected_tools": all(t in used for t in expected)}
-
-
-@dataclass
-class AnswerContains(Evaluator):
-    """Final answer: does it include the expected stable fact(s)?"""
-
-    def evaluate(self, ctx: EvaluatorContext) -> dict:
-        needles = (ctx.metadata or {}).get("contains")
-        if not needles:
-            return {}
-        hay = (ctx.output.get("answer") or "").lower()
-        return {"answer_contains": all(n.lower() in hay for n in needles)}
-
-
-@dataclass
-class NoError(Evaluator):
-    """The run produced an answer and didn't error out."""
-
-    def evaluate(self, ctx: EvaluatorContext) -> dict:
-        ans = ctx.output.get("answer") or ""
-        return {"answered": bool(ans) and not ans.startswith("ERROR:")}
 
 
 # Quality judge for open-ended cases (kept to a few cases to bound token use).

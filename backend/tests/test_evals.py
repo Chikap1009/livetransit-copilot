@@ -6,7 +6,7 @@ guarantee, verified without spending any LLM quota.
 """
 from pydantic_evals.evaluators import EvaluatorContext
 
-from backend.app.evals.cases import AnswerContains, ExpectedTools, NoError
+from backend.app.evals.evaluators import AnswerContains, ExpectedTools, NoError
 
 
 def _ctx(metadata: dict, output: dict) -> EvaluatorContext:
