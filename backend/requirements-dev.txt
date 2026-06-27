@@ -2,3 +2,4 @@
 # Install:  .venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 pytest==9.1.1
 ruff==0.15.20
+pydantic-evals==2.0.0     # agent eval harness (Phase G)
