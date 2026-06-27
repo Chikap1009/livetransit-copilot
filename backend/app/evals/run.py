@@ -66,7 +66,10 @@ async def main():
             cases=cases,
             evaluators=[ExpectedTools(), AnswerContains(), NoError()],
         )
-        report = await dataset.evaluate(task, max_concurrency=3)
+        # Serial: free Gemini is 10 requests/min/model, and with the priority keys
+        # exhausted everything funnels onto the fresh key — concurrency bursts blow the
+        # rate limit. One at a time keeps us under it.
+        report = await dataset.evaluate(task, max_concurrency=1)
         report.print(include_input=True, include_output=False)
     finally:
         await _pool.close()

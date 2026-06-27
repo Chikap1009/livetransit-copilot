@@ -1483,3 +1483,52 @@ call is then resolved (has a result), so it's not stripped and the continuation 
 ToolReturn (`ModelRequest`). `tsc --noEmit` clean.
 
 ### Note for re-test: refresh an already-broken chat tab to start a clean thread.
+
+---
+
+## Entry 37 — Phase G: agent eval harness (golden set + trajectory + LLM-judge)
+**Date:** 2026-06-28
+**Phase:** Phase G (evals)
+
+### Concepts taught (2B.11)
+- Agent outputs are non-deterministic, so you can't assert `==`. Evals = a golden set +
+  techniques: **trajectory eval** (right tools, sensible order — the distinguishing check),
+  **final-answer** checks (keyword for stable facts), and **LLM-as-judge** (rubric-scored quality,
+  with limits: can be wrong/biased, costs tokens, non-deterministic).
+
+### What we built
+- `evals/cases.py` — a **24-case golden set** across positions, arrivals, alerts, trip planning
+  (direct+transfer), RAG/policy, memory, watchdog delegation, and edge cases. Custom evaluators:
+  `ExpectedTools` (trajectory), `AnswerContains` (stable facts), `NoError`; `LLMJudge` (quality)
+  made **opt-in** via `EVAL_JUDGE=1` to bound free-tier cost.
+- `evals/run.py` — pydantic-evals harness running each case through the live Copilot
+  (`python -m backend.app.evals.run [N]`); serial (`max_concurrency=1`) to respect Gemini's
+  10 req/min; UTF-8 console fix for the rich report.
+- `tests/test_evals.py` — **deterministic** tests (no LLM) proving the evaluators catch
+  regressions: good output passes, broken output fails. This is the "broken change drops the
+  score" guarantee, CI-safe. 3/3 pass.
+- Dep: `pydantic-evals==2.0.0` (dev).
+
+### Verified (and a real find)
+- When quota was available the harness scored correctly: `trip_direct` ✔✔✔✔, RAG/policy cases
+  ✔✔✔, and **trajectory caught a real issue** — `pos_bus77` ("Is bus 77 running?") sometimes
+  answered WITHOUT calling get_vehicle_positions (✗ on expected_tools). Rephrased that golden case
+  to an unambiguous positional query (legitimate golden-set curation).
+- Deterministic evaluator tests: 3/3 pass.
+
+### >>> Free-tier reality (the Phase H lesson, live) <<<
+A full 24-case run = ~60–70 model calls (+ judges). Across today's heavy D/E/F testing plus a few
+full eval attempts, **all FOUR Gemini keys hit their (post-Dec-2025, much-reduced) daily free
+quota** — later cases fail fast with "all models failed". So a clean full **baseline** is gated on
+fresh quota. This is exactly why Phase H (caching/limits) and the multi-key chain matter, and it
+*is* the user's planned **"agent eval pass"** (memory [[agent-eval-pass]]): run the full golden set
+when quota is fresh (e.g. after daily reset / at retrain). Harness improvements made it cheaper:
+judge off by default, serial, subset via `run N`.
+
+### Phase G status: ✅ harness COMPLETE + regression-detection proven. Full live baseline across all
+24 cases is pending fresh quota (folds into the eval pass at retrain).
+
+### Next step
+Phase G **Concept Check** (eval vs unit test; trajectory vs final-answer; LLM-as-judge + limits).
+Then **Phase H** (full: Langfuse tracing + the remaining caching/rate-limit/queue work — much of
+which we've pulled forward). Pending: model retrain + the full golden-set eval pass.

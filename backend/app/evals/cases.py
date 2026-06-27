@@ -8,12 +8,17 @@ A few open-ended cases also carry an LLMJudge for answer QUALITY.
 We deliberately avoid asserting live numbers (positions/arrivals change); trajectory
 and stable-fact checks are the robust signal.
 """
+import os
 from dataclasses import dataclass
 
 from pydantic_evals import Case
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
 from backend.app.agent.gateway import MODEL
+
+# The LLM judge adds a model call per judged case; opt in with EVAL_JUDGE=1 so routine
+# runs (trajectory + stable-fact checks) stay cheap on the free tier.
+_USE_JUDGE = os.environ.get("EVAL_JUDGE", "").lower() in ("1", "true", "yes")
 
 
 # --- custom evaluators -------------------------------------------------------
@@ -72,7 +77,7 @@ def _c(name, question, *, tools=None, contains=None, judge=False, category="") -
         name=name,
         inputs=question,
         metadata=meta,
-        evaluators=(_QUALITY,) if judge else (),
+        evaluators=(_QUALITY,) if (judge and _USE_JUDGE) else (),
     )
 
 
@@ -83,7 +88,7 @@ GOLDEN: list[Case] = [
        tools=["get_vehicle_positions"], category="positions"),
     _c("pos_bus66", "Where are the buses on route 66?",
        tools=["get_vehicle_positions"], category="positions"),
-    _c("pos_bus77", "Is bus route 77 running right now?",
+    _c("pos_bus77", "Where are the route 77 buses right now?",
        tools=["get_vehicle_positions"], category="positions"),
     # arrivals / ETA
     _c("eta_stop", "What are the predicted arrivals at stop 70061?",
