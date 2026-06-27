@@ -1459,3 +1459,27 @@ panel live in the UI. Background loop available but OFF by default.
 Phase F **Concept Check** (supervisor/worker vs planner-executor/reflection/evaluator-optimizer; how
 the two agents share tools/state safely). Then **Phase G** (evals — golden set + LLM-as-judge +
 trajectory checks). Pending (after all phases): model retrain + agent eval pass.
+
+---
+
+## Entry 36 — Bugfix: chat "Processed history must end with a ModelRequest"
+**Date:** 2026-06-28
+**Phase:** Phase F follow-up (Concept Check PASSED — supervisor/worker + patterns + dedup/read-only)
+
+### Symptom
+After a tool-heavy chat (e.g. a turn that drew a trip), a later message errored with
+"Processed history must end with a `ModelRequest`" (pydantic-ai `_agent_graph.py:940`).
+
+### Root cause (traced through the AG-UI adapter)
+Our CopilotKit frontend action handlers (highlightRoute, dropPin, drawTrip, clearMap) returned
+**void**. When the agent's final turn was text + a frontend action call, that call had no result →
+"dangling". The adapter's `sanitize_messages` strips the dangling tool call but KEEPS the assistant
+text, leaving the reconstructed history ending on a `ModelResponse` → the run rejects it. (A void
+frontend action is also just bad CopilotKit practice — the model never sees a tool result.)
+
+### Fix
+Each handler now returns a short status string (e.g. "Highlighted route Red on the map."). The tool
+call is then resolved (has a result), so it's not stripped and the continuation ends on a proper
+ToolReturn (`ModelRequest`). `tsc --noEmit` clean.
+
+### Note for re-test: refresh an already-broken chat tab to start a clean thread.

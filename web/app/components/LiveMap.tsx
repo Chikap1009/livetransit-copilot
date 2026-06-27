@@ -145,13 +145,16 @@ export default function LiveMap() {
       'show, highlight, or point out a route. The route id is like Red, Orange, Blue, Green-B, ' +
       '1, or 66.',
     parameters: [{ name: 'route', type: 'string', description: 'MBTA route id', required: true }],
-    handler: ({ route }: { route: string }) => {
+    // Handlers return a string result so CopilotKit can pair the tool call with a
+    // result (a void return leaves a dangling tool call that breaks chat history).
+    handler: ({ route }: { route: string }): string => {
       const map = mapRef.current;
-      if (!map?.getLayer('route-highlight')) return;
+      if (!map?.getLayer('route-highlight')) return 'Map not ready.';
       const f: maplibregl.FilterSpecification = ['==', ['get', 'route_id'], route];
       map.setFilter('route-highlight-casing', f);
       map.setFilter('route-highlight', f);
       map.setPaintProperty('routes', 'line-opacity', 0.12);   // fade the rest
+      return `Highlighted route ${route} on the map.`;
     },
   });
 
@@ -163,9 +166,9 @@ export default function LiveMap() {
       { name: 'lon', type: 'number', description: 'longitude', required: true },
       { name: 'label', type: 'string', description: 'short label', required: false },
     ],
-    handler: ({ lat, lon, label }: { lat: number; lon: number; label?: string }) => {
+    handler: ({ lat, lon, label }: { lat: number; lon: number; label?: string }): string => {
       const map = mapRef.current;
-      if (!map) return;
+      if (!map) return 'Map not ready.';
       const marker = new maplibregl.Marker({ color: '#1a73e8' }).setLngLat([lon, lat]);
       if (label) {
         marker.setPopup(
@@ -177,6 +180,7 @@ export default function LiveMap() {
       marker.addTo(map);
       pinsRef.current.push(marker);
       map.flyTo({ center: [lon, lat], zoom: 14 });
+      return `Dropped a pin${label ? ` labeled "${label}"` : ''}.`;
     },
   });
 
@@ -203,9 +207,9 @@ export default function LiveMap() {
         ],
       },
     ],
-    handler: ({ legs }: { legs: TripLeg[] }) => {
+    handler: ({ legs }: { legs: TripLeg[] }): string => {
       const map = mapRef.current;
-      if (!map?.getLayer('route-highlight') || !legs?.length) return;
+      if (!map?.getLayer('route-highlight') || !legs?.length) return 'Nothing to draw.';
 
       // Highlight every route used by the trip, fade the rest.
       const routes = [...new Set(legs.map((l) => l.route))];
@@ -240,6 +244,7 @@ export default function LiveMap() {
         );
       });
       map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 800 });
+      return `Drew a ${legs.length}-leg trip on the map.`;
     },
   });
 
@@ -251,7 +256,7 @@ export default function LiveMap() {
     parameters: [
       { name: 'reason', type: 'string', description: 'optional, ignored', required: false },
     ],
-    handler: () => {
+    handler: (): string => {
       const map = mapRef.current;
       if (map?.getLayer('route-highlight')) {
         const none: maplibregl.FilterSpecification = ['==', ['get', 'route_id'], NO_ROUTE];
@@ -261,6 +266,7 @@ export default function LiveMap() {
       }
       pinsRef.current.forEach((m) => m.remove());
       pinsRef.current = [];
+      return 'Cleared the map.';
     },
   });
 
