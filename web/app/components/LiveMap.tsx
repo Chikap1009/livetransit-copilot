@@ -9,6 +9,12 @@ import StopPanel from './StopPanel';
 
 const NO_ROUTE = '__none__';
 
+type TripLeg = {
+  route: string;
+  fromLat: number; fromLon: number; fromLabel: string;
+  toLat: number; toLon: number; toLabel: string;
+};
+
 const TILES = 'http://localhost:3000';            // Martin tile server
 const WS_URL = 'ws://localhost:8000/ws/vehicles'; // live vehicle feed
 
@@ -171,6 +177,69 @@ export default function LiveMap() {
       marker.addTo(map);
       pinsRef.current.push(marker);
       map.flyTo({ center: [lon, lat], zoom: 14 });
+    },
+  });
+
+  useCopilotAction({
+    name: 'drawTrip',
+    description:
+      'Draw a planned trip on the map: highlight every leg\'s route line and drop a green pin at ' +
+      'the start, amber pins at any transfer points, and a red pin at the destination. Pass the ' +
+      '`draw` array returned by the plan_trip tool as `legs`.',
+    parameters: [
+      {
+        name: 'legs',
+        type: 'object[]',
+        description: 'Ordered trip legs.',
+        required: true,
+        attributes: [
+          { name: 'route', type: 'string', description: 'MBTA route id for this leg' },
+          { name: 'fromLat', type: 'number', description: 'board latitude' },
+          { name: 'fromLon', type: 'number', description: 'board longitude' },
+          { name: 'fromLabel', type: 'string', description: 'board stop name' },
+          { name: 'toLat', type: 'number', description: 'alight latitude' },
+          { name: 'toLon', type: 'number', description: 'alight longitude' },
+          { name: 'toLabel', type: 'string', description: 'alight stop name' },
+        ],
+      },
+    ],
+    handler: ({ legs }: { legs: TripLeg[] }) => {
+      const map = mapRef.current;
+      if (!map?.getLayer('route-highlight') || !legs?.length) return;
+
+      // Highlight every route used by the trip, fade the rest.
+      const routes = [...new Set(legs.map((l) => l.route))];
+      const f: maplibregl.FilterSpecification = ['in', ['get', 'route_id'], ['literal', routes]];
+      map.setFilter('route-highlight-casing', f);
+      map.setFilter('route-highlight', f);
+      map.setPaintProperty('routes', 'line-opacity', 0.12);
+
+      // Pins: green start, amber transfers, red destination. Clear any old ones first.
+      pinsRef.current.forEach((m) => m.remove());
+      pinsRef.current = [];
+      const bounds = new maplibregl.LngLatBounds();
+      const addPin = (lat: number, lon: number, label: string, color: string) => {
+        const marker = new maplibregl.Marker({ color })
+          .setLngLat([lon, lat])
+          .setPopup(
+            new maplibregl.Popup({ offset: 24 }).setHTML(
+              `<div style="font:13px system-ui;color:#111">${label}</div>`,
+            ),
+          )
+          .addTo(map);
+        pinsRef.current.push(marker);
+        bounds.extend([lon, lat]);
+      };
+      addPin(legs[0].fromLat, legs[0].fromLon, `Start: ${legs[0].fromLabel}`, '#16a34a');
+      legs.forEach((l, i) => {
+        const last = i === legs.length - 1;
+        addPin(
+          l.toLat, l.toLon,
+          last ? `Destination: ${l.toLabel}` : `Transfer to ${legs[i + 1].route} at ${l.toLabel}`,
+          last ? '#dc2626' : '#f59e0b',
+        );
+      });
+      map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 800 });
     },
   });
 

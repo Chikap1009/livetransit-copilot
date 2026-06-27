@@ -1106,3 +1106,85 @@ GOING FORWARD: run `docker system prune -af` after heavy build sessions.
   `agent-eval-pass`). (3) **C3 finale** lightweight `plan_trip`. (4) Then Phases D,E,F,G,H,I,J.
 - Phase C commits (all pushed): 860bb42, 300c129, af61cd2, 67a306f, 3f02536, 9d1bd1e, 253b771,
   f53b53c, a4e8cd6, + fallback 0e03807/2fd4f69/2393901.
+
+---
+
+## Entry 30 — Phase C finale: trip planning with transfers + map fusion; PHASE C COMPLETE
+**Date:** 2026-06-27
+**Phase:** Phase C (real frontend) — C3 finale
+
+### What the user asked for
+The "A → B + ETA" trip planner, but explicitly: when A and B are NOT on one direct
+route, don't just say "no direct route" — tell the user the **line changes and stop
+changes** to reach B, with **per-leg ETA and a total ETA**, and draw it on the map.
+
+### The new concept taught: minimum-transfers routing (BFS over the route graph)
+- Model the network as **stations connected by routes**. Riding one route from any of its
+  stations to another = **one leg**; switching routes at a shared station = **one transfer**.
+- A **breadth-first search** (expand "reachable in 1 leg, then 2, …") finds the path with the
+  **fewest transfers** first — what a rider usually wants. Then a scheduled-times lookup fills
+  in the clock for each leg, chained so each leg departs after the previous arrives (+3 min
+  transfer buffer) → total wall-clock ETA.
+- Scope guard (kept lightweight, NOT OpenTripPlanner): **direct** trips work on ANY route
+  (incl. buses); **transfer** routing runs only over the rapid-transit graph
+  (`route_type IN (0,1,2)` = subway/light-rail/commuter-rail, ~22 routes) where "fewest
+  changes" answers are genuinely correct. Bus-only pairs with no direct route are declined
+  honestly rather than inventing bad multi-bus paths.
+
+### What we did
+- **Migration `0011_stop_times_stop_idx.sql`**: B-tree index on `stop_times(stop_id)`. The
+  planner filters the 3.3M-row table by `stop_id` (only the `(trip_id, stop_sequence)` PK
+  existed) → turns seq scans into index scans. (Phase 2 indexing lesson, B-tree flavor.)
+- **`backend/app/agent/routing.py`** (new, the engine):
+  - `_build_rail_graph` / `get_rail_graph` — station↔route adjacency + platforms + coords for
+    the rail network; **cached module-level** (static schedule data; ~280 ms first call, then 0).
+  - `_resolve_station` — name → best station, **rail-preferred + exact/prefix-preferred** (fixed
+    a real bug: "Kendall"/"Harvard" first matched random *bus* stops like "Western Ave @ N
+    Harvard St", hijacking the route; now SQL orders exact→prefix→short-name so the LIMIT can't
+    drop the real station, and rail stations win ties).
+  - `_find_leg` — soonest single trip boarding in stop-set A then alighting in stop-set B (after
+    a ready-time), with GTFS `HH:MM:SS` (incl. >24h) → absolute NY-tz timestamps.
+  - `_bfs` / `_reconstruct` — min-transfers path → `[(route, board_station, alight_station)]`.
+  - `plan_trip` — resolve → try direct (any route) → else BFS over rail → fill+chain leg times.
+    Returns `{found, origin, destination, transfers, total_minutes, departs, arrives, legs[],
+    draw[]}` where each `draw` entry is **pre-shaped** for the frontend `drawTrip(legs)` action.
+- **`tools.py`** + **`copilot.py`**: registered `@copilot.tool plan_trip`; system prompt teaches
+  the agent to call `plan_trip` then pass its `draw` array to `drawTrip`, narrate each leg + say
+  where to change lines, and report `total_minutes` **verbatim** (don't recompute — it includes
+  transfer waits).
+- **`web/app/components/LiveMap.tsx`**: new `drawTrip(legs)` CopilotKit action (`object[]` param)
+  — highlights **all** legs' routes (`['in', route_id, [..]]`), drops a green **Start** pin, amber
+  **Transfer** pins (labeled "Transfer to <next line> at <stop>"), a red **Destination** pin, and
+  `fitBounds` to frame the whole trip. Added a `TripLeg` type.
+
+### Bugs caught & fixed during the build
+1. `%-I` strftime (no-zero-pad) is **Linux-only** → crashed on Windows dev; made `_clock`
+   portable (`%I…`.lstrip("0")).
+2. Bus-stop name-hijack (above) → rail-preferred, exact/prefix-ordered resolution.
+3. Sloppy total-minutes calc → now true wall-clock first-board→last-alight (only when every leg
+   is timed).
+
+### How it was verified
+- **Engine** (direct test vs live DB): Kendall→Park St = direct Red 4m; Kendall→Boylston = Red→
+  Green @ Park St (1 transfer); Harvard→Airport = Red→Green→Blue (2 transfers, times chained);
+  Davis→Lechmere = Red→Green. 43–283 ms.
+- **Agent**: `POST /agent/ask "Kendall to Boylston"` → `tools_used:["plan_trip"]`, correct
+  narration. (Note: the `/agent/ask` *structured* path is still flaky on the Groq fallback —
+  known since Entry 29; the user-facing CopilotKit chat uses the text path and `drawTrip`.)
+- **Browser (user confirmed)**: all 4 scenarios (transfer, direct, two-transfer, clear) draw and
+  narrate correctly at http://localhost:3002.
+- ruff clean; `tsc --noEmit` clean; api rebuilt + healthy.
+
+### Phase C status: ✅ COMPLETE.
+Next.js + CopilotKit frontend; agent draws on the map (highlightRoute, dropPin, drawTrip,
+clearMap); structured outputs + streaming; Groq fallback. The Bible's Phase C threshold —
+"ask a trip question and watch the agent draw the route" — is met, with transfers.
+
+### >>> Reminders still pending (deferred to AFTER all phases, per user) <<<
+(1) Retrain ETA model w/ full-day data (memory `retrain-eta-model-full-day`). (2) Comprehensive
+agent eval pass (memory `agent-eval-pass`). User chose to do both once all phases are done.
+
+### Next step
+**Phase D** — memory: conversation (Redis) + long-term/vector (pgvector) so the agent remembers
+turns, the user's home/work stops, and preferences. (Then E RAG, F Watchdog, G evals, H tracing/
+cost, I MCP, J deploy.)
