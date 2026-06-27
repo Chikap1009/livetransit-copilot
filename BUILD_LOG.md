@@ -1532,3 +1532,40 @@ judge off by default, serial, subset via `run N`.
 Phase G **Concept Check** (eval vs unit test; trajectory vs final-answer; LLM-as-judge + limits).
 Then **Phase H** (full: Langfuse tracing + the remaining caching/rate-limit/queue work — much of
 which we've pulled forward). Pending: model retrain + the full golden-set eval pass.
+
+---
+
+## Entry 38 — Phase G follow-ups: CI fix + eval checkpoint/resume (Concept Check PASSED)
+**Date:** 2026-06-28
+
+### Phase G Concept Check — PASSED
+(1) agent non-deterministic vs unit test deterministic ✓; (2) trajectory = tools/path vs
+final-answer = output validity, trajectory under-valued but key; caught pos_bus77 not calling
+get_vehicle_positions ✓; (3) LLM-judge grades quality but is itself non-deterministic/biased ✓.
+
+### CI was RED (user caught it) — fixed
+Commit 26aec4a failed the "Run tests" step. Cause: `tests/test_evals.py` imported
+`evals/cases.py` → `agent.gateway.MODEL`, and building the FallbackModel **eagerly resolves a
+provider**, which raises `UserError: Set GROQ_API_KEY` when CI has no API keys. (Local shell had
+keys, hiding it; reproduced by stripping GEMINI/GOOGLE/GROQ from env.) Fix: moved the three
+deterministic evaluators to `evals/evaluators.py` (no gateway import); `cases.py` keeps the golden
+set + LLMJudge. test_evals + run import evaluators from there. Verified import works with no keys;
+ruff clean; 9/9 pytest. **CI green again** (0854912, eb3baa7) — confirmed via GitHub API (no `gh`
+CLI installed; used api.github.com Actions endpoints).
+
+### Eval checkpoint/resume (user request)
+`run.py` now saves each case's result to `_progress.json` (gitignored) the moment it succeeds.
+On the next run, cached cases are reused instantly (no agent call / no quota) and only
+missing/errored cases run — so a run killed by quota exhaustion **resumes from where it stopped**.
+`--fresh` clears it; errors are never checkpointed (so they retry). Verified: a seeded case
+re-scored ✔✔ in 24µs with no LLM call.
+
+### >>> STANDING TODO (do before the project is fully finished) <<<
+Run the **full 24-case golden set** once all keys have fresh quota:
+`EVAL_JUDGE=1 python -m backend.app.evals.run` (it will resume via _progress.json). This is the
+[[agent-eval-pass]] (also pair with the [[retrain-eta-model-full-day]] retrain). Continue other
+phases meanwhile. Also: **keep checking CI stays green** after each push.
+
+### Next step
+**Phase H** (full): Langfuse tracing + remaining cost/rate-limit work. Pending: retrain + full
+eval pass (both need fresh quota; resume-capable now).
