@@ -1370,3 +1370,37 @@ rate limiting, request queue.)
 
 ### Next step
 Wire the reliable provider once the user supplies a key, then resume **Phase F** (Watchdog).
+
+---
+
+## Entry 34 — Phase H (partial, part 2): multi-key Gemini rotation (reliable capacity)
+**Date:** 2026-06-27
+**Phase:** Phase H slice — provider chain
+
+### Decision (user)
+Don't waste keys: keep the ORIGINAL Gemini key as priority (use it first the moment its quota
+resets), add new keys as backups, allow adding more later (more Google accounts/projects = more
+free quota). Gemini is the only reliable free tool-caller (Groq/Cerebras Llama mangle our many-tool
+calls), so chaining multiple Gemini keys is the right capacity strategy.
+
+### What we did
+- `gateway.py` now builds the FallbackModel chain **dynamically from env**: GEMINI_API_KEY
+  (priority) then GEMINI_API_KEY_2, _3, ... (backups). For each key: a `GoogleProvider(api_key=...)`
+  with `GoogleModel('gemini-2.5-flash')` + `('gemini-2.5-flash-lite')`. Groq stays LAST as a
+  plain-text safety net. So the chain is: key1-Flash → key1-FlashLite → key2-Flash → key2-FlashLite
+  → … → Groq. A 429 from an exhausted key fails over instantly (no quota consumed), so the spent
+  priority key costs nothing now and auto-resumes first when it resets.
+- `USAGE_LIMITS` request_limit 8 → 12 (room for fallback attempts across the longer chain).
+- `.env`: added GEMINI_API_KEY_2 (new key; git-ignored). `.env.example` + docker-compose.yml:
+  documented/pass GEMINI_API_KEY_2.._4. Adding a key later = edit .env + `docker compose up -d api`.
+
+### Verified
+- Old key (exhausted) → 429 → fell to NEW key's Gemini (not Groq): "elevator broken, wheelchair
+  options?" → search_docs → clean grounded answer + citation "MBTA Accessibility — Elevators and
+  escalators". No `<function=...>` mangling. ruff clean; api healthy.
+
+### Phase H (partial) status: caching + graceful degradation + multi-key Gemini rotation done. Full
+Phase H later: Langfuse tracing, per-user rate limiting, request queue, chat-path caching.
+
+### Next step
+User tests Phase E with 2 tough prompts on the chat, then **Phase F** (Network Watchdog).
