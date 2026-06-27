@@ -12,6 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
+# Bake the embedding model into the image so production never downloads it at
+# runtime (no cold-start network dependency on a deploy host).
+ENV FASTEMBED_CACHE=/app/.fastembed_cache
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/app/.fastembed_cache')"
+
 # Copy the application code.
 COPY backend ./backend
 

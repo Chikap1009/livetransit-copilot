@@ -17,10 +17,13 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from pydantic_ai.messages import ToolCallPart
 
+from backend.app.agent import conversation
 from backend.app.agent.copilot import Deps, copilot
 from backend.app.agent.gateway import USAGE_LIMITS
 from backend.app.core import config, metrics
 from backend.app.ml import predictor
+
+DEMO_USER = "demo"   # single-user demo; real per-user ids arrive with auth (Phase J)
 
 # How recent a position must be to count as a vehicle's "current" location.
 RECENT_WINDOW = "90 seconds"
@@ -112,12 +115,22 @@ async def prometheus_metrics():
 
 class AskRequest(BaseModel):
     question: str
+    thread_id: str | None = None   # pass to get conversation memory (Redis-backed)
 
 
 @app.post("/agent/ask")
 async def agent_ask(req: AskRequest):
-    """Run the Copilot agent on an English question (ReAct loop over the live tools)."""
-    result = await copilot.run(req.question, deps=Deps(pool=pool), usage_limits=USAGE_LIMITS)
+    """Run the Copilot agent on an English question (ReAct loop over the live tools).
+
+    If thread_id is given, prior turns are loaded from Redis as conversation memory
+    and the new turn is saved back.
+    """
+    history = (
+        await conversation.load_history(rds, DEMO_USER, req.thread_id) if req.thread_id else []
+    )
+    result = await copilot.run(
+        req.question, deps=Deps(pool=pool), message_history=history, usage_limits=USAGE_LIMITS,
+    )
     tools_used = [
         part.tool_name
         for msg in result.all_messages()
@@ -125,6 +138,9 @@ async def agent_ask(req: AskRequest):
         # only tool *calls*, excluding Pydantic AI's internal "final_result_*" output tool
         if isinstance(part, ToolCallPart) and not part.tool_name.startswith("final_result")
     ]
+    if req.thread_id:
+        answer_text = getattr(result.output, "summary", None) or str(result.output)
+        await conversation.save_turn(rds, DEMO_USER, req.thread_id, req.question, answer_text)
     return {
         "answer_type": type(result.output).__name__,
         "answer": result.output,        # a validated Pydantic object

@@ -4,15 +4,16 @@ from dataclasses import dataclass
 from psycopg_pool import AsyncConnectionPool
 from pydantic_ai import Agent, RunContext
 
-from backend.app.agent import tools
+from backend.app.agent import memory, tools
 from backend.app.agent.gateway import MODEL
 from backend.app.agent.schemas import Answer, ArrivalAnswer
 
 
 @dataclass
 class Deps:
-    """Dependencies handed to tools at run time (here: the DB pool)."""
+    """Dependencies handed to tools at run time (the DB pool + who's asking)."""
     pool: AsyncConnectionPool
+    user_id: str = "demo"
 
 
 SYSTEM_PROMPT = (
@@ -36,6 +37,14 @@ SYSTEM_PROMPT = (
     "time using the tool's `total_minutes` value verbatim (it already includes waiting at "
     "transfers) — do not recompute it. If a trip has transfers, clearly say where to change lines. "
     "If plan_trip returns found=false, relay its message.\n"
+    "MEMORY: when the user tells you a durable fact about themselves — their home or work "
+    "stop, or a travel preference (e.g. 'my home stop is Davis', 'I prefer fewer transfers') — "
+    "call remember(fact, kind) to save it (kind is 'place' for stops, 'preference' for "
+    "preferences, else 'fact'). Always phrase the saved fact as a complete, self-describing "
+    "statement — 'home stop is Davis', 'work stop is Kendall', 'prefers fewer transfers' — never "
+    "just a bare value like 'Davis'. Known facts about the user are given to you below and you "
+    "should use them without being asked (e.g. 'how do I get home?' uses their home stop). For "
+    "anything else you might have been told before, call recall(query).\n"
     "Be concise and specific; if a tool returns no data, say so plainly."
 )
 
@@ -45,6 +54,34 @@ copilot = Agent(
     output_type=[ArrivalAnswer, Answer],   # the model fills (and we validate) one of these
     system_prompt=SYSTEM_PROMPT,
 )
+
+
+@copilot.system_prompt
+async def _inject_user_memory(ctx: RunContext[Deps]) -> str:
+    """Append the user's saved preferences/places so the agent uses them unprompted."""
+    prefs = await memory.load_preferences(ctx.deps.pool, ctx.deps.user_id)
+    if not prefs:
+        return ""
+    lines = "\n".join(f"- ({p['kind']}) {p['content']}" for p in prefs)
+    return f"Known facts about this user:\n{lines}"
+
+
+@copilot.tool
+async def remember(ctx: RunContext[Deps], fact: str, kind: str = "fact") -> dict:
+    """Save a durable fact about the user. kind: 'place' | 'preference' | 'fact'.
+
+    Use for home/work stops and travel preferences the user states. Phrase `fact` as a
+    complete statement, e.g. 'home stop is Davis' — not a bare value like 'Davis'.
+    """
+    await memory.remember(ctx.deps.pool, ctx.deps.user_id, kind, fact)
+    return {"saved": fact, "kind": kind}
+
+
+@copilot.tool
+async def recall(ctx: RunContext[Deps], query: str, k: int = 5) -> dict:
+    """Recall durable facts previously saved about the user, by similarity to a query."""
+    rows = await memory.recall(ctx.deps.pool, ctx.deps.user_id, query, k)
+    return {"memories": [r["content"] for r in rows]}
 
 
 @copilot.tool

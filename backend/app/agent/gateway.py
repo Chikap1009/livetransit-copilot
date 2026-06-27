@@ -7,10 +7,14 @@ from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.usage import UsageLimits
 
-# Error fragments that should trigger a fallback (rate limits, plus Groq's flaky
-# streaming tool-call error which is transient and usually succeeds on retry).
+# Error fragments that should trigger a fallback:
+#  - rate limits / quota (429, resource_exhausted, quota)
+#  - transient provider overload (503 / UNAVAILABLE / "overloaded" — Gemini's
+#    "experiencing high demand, try again later"); these should fail over, not surface
+#  - Groq's flaky streaming tool-call errors (usually succeed on the next provider)
 _FALLBACK_MARKERS = (
     "429", "resource_exhausted", "quota",
+    "503", "unavailable", "overloaded", "high demand", "try again later",
     "failed to call a function", "failed_generation", "tool_use_failed",
 )
 
@@ -28,13 +32,18 @@ def _should_fallback(exc: Exception) -> bool:
     return any(marker in text for marker in _FALLBACK_MARKERS)
 
 
-# Fallback chain: Gemini first; on rate-limit, fall to Groq. Groq's streaming tool-call
-# is intermittently flaky, so it's listed multiple times for in-place retries. Provider
-# switch is pure config — add Cerebras/OpenRouter here later (Phase H).
+# Fallback chain (config, not code). Both Gemini tiers emit well-formed structured
+# tool calls; Groq's Llama intermittently emits tool calls as <function=...> *text*
+# that can't be parsed, so it sits LAST as a plain-text safety net. Flash-Lite has its
+# own (larger) free quota, so when Flash's 250/day is exhausted we fall to another
+# reliable Gemini tier before ever touching Groq. Add Cerebras/OpenRouter here in Phase H.
+_FLASH = "google:gemini-2.5-flash"
+_FLASH_LITE = "google:gemini-2.5-flash-lite"
 _GROQ = "groq:llama-3.3-70b-versatile"
 MODEL = FallbackModel(
-    "google:gemini-2.5-flash",
-    _GROQ, _GROQ, _GROQ, _GROQ,
+    _FLASH,
+    _FLASH_LITE,
+    _GROQ, _GROQ,
     fallback_on=_should_fallback,
 )
 

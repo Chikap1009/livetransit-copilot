@@ -1188,3 +1188,82 @@ agent eval pass (memory `agent-eval-pass`). User chose to do both once all phase
 **Phase D** — memory: conversation (Redis) + long-term/vector (pgvector) so the agent remembers
 turns, the user's home/work stops, and preferences. (Then E RAG, F Watchdog, G evals, H tracing/
 cost, I MCP, J deploy.)
+
+---
+
+## Entry 31 — Phase D: three-tier memory (Redis + pgvector) + fallback hardening; PHASE D COMPLETE
+**Date:** 2026-06-27
+**Phase:** Phase D (memory)
+
+### Concepts taught
+- **Three memory tiers**: short-term *conversation* (what we just said — Redis, per thread),
+  long-term *facts* (home/work stop, prefs — Postgres, across sessions), and *vector* recall
+  (similar-by-meaning — pgvector). Long-term + vector share one table: a fact row stores the text
+  AND its embedding, so we fetch by exact key OR by meaning.
+- **Embeddings for retrieval** (user already knew embeddings from ML): store each memory's vector;
+  at query time embed the query and find nearest (cosine). "how do I get home?" lands near "home
+  stop is Davis" with no shared words.
+- **HNSW** = pgvector's approximate-nearest-neighbour index (GiST's high-dimensional cousin) —
+  keeps similarity search fast as memories grow.
+- **Why pgvector in the same DB**: join memory against live/PostGIS data in one query, zero new
+  infra (the reason we didn't add a separate vector store).
+
+### Decision: local embeddings (fastembed), deploy-ready
+User wanted local (no quota) AND deployable. Chose **fastembed** (BAAI/bge-small-en-v1.5, 384-dim,
+ONNX/CPU — no torch, no API). Runs on any CPU host (droplet). **Model baked into the api image at
+build time** (Dockerfile `RUN python -c "...TextEmbedding(...)"` + `FASTEMBED_CACHE`) so production
+never downloads at runtime. embeddings.py reads `FASTEMBED_CACHE` (set in Docker; None locally).
+
+### What we did
+- **D1 schema** — `0012_memory.sql`: `CREATE EXTENSION vector`; `user_memory(id, user_id, kind,
+  content, embedding vector(384), created_at)` + **HNSW** cosine index + `(user_id, kind)` btree +
+  UNIQUE(user_id, content) (no dup facts). pgvector 0.8.3 already in our timescaledb-ha image — no
+  Neon needed locally; same extension works on Neon in Phase J.
+- **D2 long-term + vector** — `embeddings.py` (lazy `lru_cache` model, `embed()` via
+  `asyncio.to_thread` since fastembed is sync/CPU; `to_pgvector()` literal). `memory.py`:
+  `remember` (embed + INSERT ON CONFLICT), `recall` (ORDER BY `embedding <=> query::vector`),
+  `load_preferences` (exact pull of prefs/places). copilot.py: `Deps.user_id="demo"`, a dynamic
+  `@copilot.system_prompt` that injects the user's saved facts every run (used unprompted), and
+  `remember`/`recall` tools. Prompt requires saving **self-describing** facts ("home stop is Davis",
+  not "Davis") — fixed after the model first stored a bare value.
+- **D3 conversation (Redis)** — `conversation.py`: `load_history`/`save_turn` keyed
+  `conv:{user}:{thread}` (list, last 12 turns, 1-day TTL), rebuilding pydantic-ai
+  ModelRequest/ModelResponse. `/agent/ask` now takes optional `thread_id` → loads history into
+  `message_history`, saves the new turn. (The CopilotKit chat already gets in-session memory via
+  AG-UI replay; this gives the REST path durable server-side memory and teaches the tier.)
+
+### Fallback hardening (a slice of Phase H, pulled forward — testing forced it)
+Heavy agent testing exhausted Gemini Flash (250/day) → fell straight to Groq, whose Llama emits
+tool calls as **`<function=name,{args}</function>` text** (not the API tool-call field), which
+pydantic-ai can't parse → `UnexpectedModelBehavior`/validation errors in the chat. Fixes in
+`gateway.py`:
+1. Inserted **Gemini 2.5 Flash-Lite** between Flash and Groq — still Gemini (well-formed tool
+   calls) + its own larger free quota, so we hit a *reliable* tier before the flaky Llama.
+2. Added transient-overload markers (`503`, `unavailable`, `overloaded`, `high demand`,
+   `try again later`) to `_should_fallback` so Gemini's "experiencing high demand" 503 **fails
+   over** instead of surfacing (it streams in-band on a 200, so it must match by message).
+
+### How it was verified
+- `memory.py` direct test: dedup works; semantic recall correct ("how do I get home?"→Davis 0.37,
+  "where do I work?"→Kendall 0.38, "do I like transfers?"→fewer-transfers 0.20).
+- `conversation.py` round-trip: 2 turns → 4 typed messages rebuilt.
+- Agent end-to-end (after Flash-Lite fix): "Plan a trip from Harvard to my home stop" →
+  tools `recall`+`plan_trip` → Harvard→Davis (knew home unprompted). "How do I get from home to
+  work?" → recalled BOTH home=Davis & work=Kendall, planned Davis→Kendall 11min, clean structured
+  output. User confirmed the chat worked for several questions.
+- ruff clean; api rebuilt; embedding model baked into image.
+
+### KNOWN ISSUE (not a Phase D bug): free-tier exhaustion
+After ~heavy testing, "All models from FallbackModel failed (4 sub-exceptions)" — Flash + Flash-Lite
++ Groq all out of daily free quota/tokens. This is the war story Phase H addresses (caching,
+per-user rate limiting, more providers Cerebras/OpenRouter, request queue). Quotas reset daily.
+Mitigation options noted for next session: fresh Gemini key, add Cerebras/OpenRouter, or just wait.
+
+### Phase D status: ✅ COMPLETE (functionally verified). Three tiers live: conversation (Redis),
+long-term (Postgres exact), vector (pgvector HNSW similarity). Single "demo" user until auth.
+
+### Next step
+Phase D **Concept Check** (name the 3 tiers + where each lives; what an embedding is + how
+similarity search works; why pgvector lives in the same DB). Then **Phase E** (agentic/corrective
+RAG over service alerts + policy docs with citations). Decide LLM-capacity approach for continued
+testing. Pending (after all phases): model retrain + agent eval pass.
