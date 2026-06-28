@@ -71,15 +71,23 @@
 
     map.on('load', () => {
       // --- Real MBTA network from Martin vector tiles (drawn BENEATH the dots) ---
-      const TILES = 'http://localhost:3000';   // Martin tile server (local dev)
+      // Local dev hits Martin directly on :3000; in production tiles are served same-origin
+      // through the /tiles reverse-proxy (see ops/deploy/Caddyfile), so no mixed-content/CORS.
+      const TILES = location.hostname === 'localhost'
+        ? 'http://localhost:3000'
+        : `${location.origin}/tiles`;
 
-      map.addSource('routes', { type: 'vector', url: `${TILES}/route_shapes` });
+      map.addSource('routes', {
+        type: 'vector', tiles: [`${TILES}/route_shapes/{z}/{x}/{y}`], maxzoom: 16,
+      });
       map.addLayer({
         id: 'routes', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
         paint: { 'line-color': ['get', 'route_color'], 'line-width': 2, 'line-opacity': 0.85 },
       });
 
-      map.addSource('stops', { type: 'vector', url: `${TILES}/stops` });
+      map.addSource('stops', {
+        type: 'vector', tiles: [`${TILES}/stops/{z}/{x}/{y}`], maxzoom: 16,
+      });
       map.addLayer({
         id: 'stops', type: 'circle', source: 'stops', 'source-layer': 'stops', minzoom: 13,
         paint: {

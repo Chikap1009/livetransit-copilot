@@ -2,11 +2,14 @@
 # The domain comes from the LT_DOMAIN env var (e.g. livetransit.duckdns.org). Caddy obtains
 # and renews the TLS cert automatically as long as port 80 is reachable from the internet.
 {$LT_DOMAIN} {
-	# Vector tiles (Martin) under /tiles/* -> the tiles service (prefix stripped).
+	# Vector tiles (Martin) under /tiles/* -> the tiles service (prefix stripped):
+	# /tiles/route_shapes/{z}/{x}/{y} -> Martin's /route_shapes/{z}/{x}/{y}.
 	handle_path /tiles/* {
 		reverse_proxy tiles:3000
 	}
-	# Everything else -> the API (serves REST, the agent, WebSockets, and /web live map).
+	# Everything else -> the API (REST, the agent, WebSockets, and the /web live map).
 	# Caddy proxies WebSocket upgrades automatically.
-	reverse_proxy api:8000
+	handle {
+		reverse_proxy api:8000
+	}
 }
