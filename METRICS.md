@@ -25,17 +25,19 @@ Bonus: H3 neighborhood lookup (`WHERE h3_cell = ...`) uses an `Index Only Scan` 
 ### ML arrival predictor (Phase 6) — LightGBM delay-propagation model
 Framing: predict a vehicle's delay at an upcoming stop from its current (upstream) delay +
 hour/day/route/stop_sequence. **Time-based split** (train on earlier ~80%, test on later ~20%)
-to prevent leakage. ~30,800 clean labels (filtered |delay|≤30 min, approach <60 m).
+to prevent leakage. Retrained 2026-06-28 on **full-day** data (~413k labels, 4 days incl. morning +
+evening rush — vs the v1 evening-only ~30,800).
 
 | Predictor | MAE (s) on held-out later period |
 |---|---|
-| Baseline: schedule (assume on-time) | 249.3 |
-| Baseline: historical avg per route | 203.7 |
-| Baseline: persistence (next = current) | 48.7 |
-| **LightGBM model** | **44.0** |
+| Baseline: schedule (assume on-time) | 313.3 |
+| Baseline: historical avg per route | 250.4 |
+| Baseline: persistence (next = current) | 53.9 |
+| **LightGBM model (v2, full-day)** | **45.4** |
 
-**82.3% better than schedule**, **9.6% better than the strong persistence baseline**. CPU-trained
-in seconds (no GPU). Re-trains as more history accrues.
+**85.5% better than schedule**, **15.8% better than the strong persistence baseline**. CPU-trained
+in seconds (no GPU). (v1 was 44.0 on evening-only data; v2's 45.4 is on the harder full-day
+held-out period — a more honest, representative number.) Re-trains as more history accrues.
 
 ## Brain (Copilot)
 _To be captured in the agentic phases (A–J): tool count, eval scores, agent latency,

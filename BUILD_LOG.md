@@ -1653,3 +1653,39 @@ short-TTL staleness; fallback = config/keys not code; public agent needs per-use
 Phase I **Concept Check** (what MCP is + problem it solves; Tools vs Resources vs Prompts; why a
 standard beats custom integrations). Then **Phase J** (deploy: Neon + Upstash + droplet + Cloudflare
 Pages + R2 + prod secrets + live URL). Standing: retrain + full eval pass + watch a Langfuse trace.
+
+---
+
+## Entry 41 — ETA model retrain (v2, full-day) + partial eval baseline (12/24, all pass)
+**Date:** 2026-06-28
+**Phase:** Standing items (Phase I Concept Check PASSED first: MCP=USB-C, expose once; Tools/
+Resources/Prompts; host provides the LLM)
+
+### ML retrain (v2) — the [[retrain-eta-model-full-day]] reminder, now DONE (memory retired)
+Data grew to **465k arrivals over 4 service dates with full-day coverage** (morning rush 5-9,
+midday, evening rush) vs v1's evening-only ~31k. Reran `python -m backend.app.ml.train` (train
+330,329 / test 82,583, time-split at 2026-06-27 17:37). Held-out MAE: schedule 313.3, hist-avg
+250.4, persistence 53.9, **MODEL 45.4** (85.5% better than schedule, 15.8% better than persistence).
+v1 was 44.0 on evening-only; v2's 45.4 is on the harder full-day held-out set — more honest/robust.
+`docker compose restart api` → endpoint now reports mae_model_s=45.4. METRICS.md updated.
+
+### Eval pass — partial run, CHECKPOINTED (resume-capable)
+Ran the full golden set (no judge, to maximize coverage/quota). Keys (the 5 Gemini) had enough for
+**12/24 cases before quota exhausted**; the checkpoint saved them, the other 12 retry next run.
+Scored the 12 deterministically from the checkpoint: **12/12 fully PASS** (trajectory + stable-fact
++ answered) — pos×3, eta_stop, alerts_orange, trip_davis_alewife, trip_transfer, rag_fare/monthly/
+bike/elevator/overnight.
+
+### >>> EVAL FINDING (the point of trajectory evals) <<<
+`trip_transfer` (Kendall→Boylston) made **~22 tool calls in one run** (plan_trip ×4, get_service_
+alerts ×18) — answered correctly but a redundant, quota-burning loop (and a big reason quota died
+after 12 cases). Likely a structured-output retry loop on a rate-limited/degraded model path
+(clean single-call runs were seen in Phase C). TODO: open its Langfuse trace, confirm cause, and
+fix (prompt or output handling). Tracked under [[agent-eval-pass]].
+
+### Resume the eval: `python -m backend.app.evals.run` (reuses the 12, runs the rest); add
+`EVAL_JUDGE=1` later to add quality scores to the cached outputs (judge-only calls, no agent re-run).
+
+### Next step
+**Phase J** (deploy). The eval can be finished anytime after deploy (harness is local/independent,
+resume-capable). Standing: finish 12 remaining eval cases + investigate the trip_transfer loop.
