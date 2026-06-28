@@ -1,0 +1,30 @@
+# docker-compose.caddy.yml — HTTPS overlay using Caddy + a free DuckDNS domain.
+#
+# An alternative to the Cloudflare Tunnel path (docker-compose.prod.yml) for when you have a
+# DNS name pointing at the host's public IP (e.g. DuckDNS) and ports 80/443 are open. Caddy
+# terminates TLS (auto Let's Encrypt) and reverse-proxies to the api/tiles containers.
+#
+# Bring up alongside the base stack:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d caddy
+#
+# Requires LT_DOMAIN in .env (e.g. LT_DOMAIN=livetransit.duckdns.org).
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: lt-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LT_DOMAIN: ${LT_DOMAIN}
+    volumes:
+      - ./ops/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # persists issued certs across restarts
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

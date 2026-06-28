@@ -1,0 +1,12 @@
+# ops/deploy/Caddyfile — reverse proxy with automatic HTTPS (Let's Encrypt).
+# The domain comes from the LT_DOMAIN env var (e.g. livetransit.duckdns.org). Caddy obtains
+# and renews the TLS cert automatically as long as port 80 is reachable from the internet.
+{$LT_DOMAIN} {
+	# Vector tiles (Martin) under /tiles/* -> the tiles service (prefix stripped).
+	handle_path /tiles/* {
+		reverse_proxy tiles:3000
+	}
+	# Everything else -> the API (serves REST, the agent, WebSockets, and /web live map).
+	# Caddy proxies WebSocket upgrades automatically.
+	reverse_proxy api:8000
+}
