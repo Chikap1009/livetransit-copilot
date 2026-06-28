@@ -6,6 +6,12 @@ A real-time public-transit tracking + ML arrival-prediction platform (**LiveTran
 with a production-grade **agentic AI assistant** layered on top (**the Copilot**, the "brain") that
 reasons over the live data using real tools, memory, retrieval, and a map it can draw on.
 
+![LiveTransit Copilot — live map with the agent drawing a planned Red Line trip, ML arrival predictions, and the Network Watchdog](docs/proof/live_map.png)
+
+> *Above: the deployed app. The user asked "Plan a trip from Davis to Kendall" — the agent called
+> `plan_trip` + `drawTrip` and rendered the Red Line route on the live map, while the Network
+> Watchdog (a second agent) flags real bus-bunching incidents and a clicked stop shows a LightGBM ETA.*
+
 ---
 
 ## What it does

@@ -1745,3 +1745,57 @@ Provision the **Oracle AMD micro** (E2.1.Micro), add swap, deploy the trimmed st
 +API+poller+processor+tiles+cloudflared) + HTTPS via Cloudflare Tunnel, deploy `web/` to Cloudflare
 Pages, lock CORS to the Pages origin, README + proof links. Stopgap available: Cloudflare quick
 tunnel from the laptop for an instant public URL. Standing: A1 retry at off-peak; finish 12 evals.
+
+---
+
+## Entry 43 — Phase J COMPLETE: live, public, 24/7, $0 (Oracle + Vercel)
+**Date:** 2026-06-29
+**Phase:** J (deploy) — ✅ DONE
+
+### 🔴 Live: https://livetransit.duckdns.org/web (map) · https://livetransit-copilot.vercel.app (CopilotKit UI)
+
+### Host decisions (the free-tier gauntlet, resolved)
+GitHub Student **DigitalOcean credit ended** ($5 left) and Oracle **Ampere A1** (ARM, 24GB) was
+chronically **out of capacity** in ap-mumbai-1. Landed on the **Oracle Always-Free AMD micro**
+(`VM.Standard.E2.1.Micro`, 1 OCPU / **1 GB**, x86) — free forever, x86 = all prebuilt wheels.
+1 GB handled with a **4 GB swap file** (`swappiness=10`). Cloudflare Tunnel needs a Cloudflare-managed
+domain (Student Namecheap blocked for Indian colleges), so HTTPS instead via **DuckDNS + Caddy**.
+
+### Server bootstrap (all reproducible / committed where possible)
+swap + Docker (`get.docker.com`) → clone → `curl` GTFS from MBTA CDN → `scp` the ETA model +
+`.env` (secrets, laptop→server, never via git) → **`ops/deploy/init_db.sh`** applied the ORIGINAL
+0001–0014 migrations (full TimescaleDB — TSL retention/continuous-agg/`add_job` all work here) +
+loaded GTFS (403/10,308/121,935/**3,345,680**/1,150). Core stack (postgres/redis/api/poller/
+processor/tiles) up; pipeline verified (31k→ positions, 399 msgs/poll, ETA model live).
+
+### HTTPS — DuckDNS + Caddy (free, permanent, auto-TLS)
+`livetransit.duckdns.org` → Oracle IP; opened **80/443** in the OCI Security List + instance
+**iptables** (`netfilter-persistent save`); installed `cron` (minimal image lacked it) for a DuckDNS
+auto-updater. **Caddy** (`docker-compose.caddy.yml` + `ops/deploy/Caddyfile`) auto-obtained a
+**Let's Encrypt** cert (tls-alpn-01) and reverse-proxies api + `/tiles`→Martin (prefix-stripped).
+
+### Frontend wiring
+- `frontend/` live map: tiles were hardcoded `localhost:3000` → switched to the same-origin
+  **`/tiles` proxy** with explicit `{z}/{x}/{y}` templates. Route network + stops + dots render.
+- `web/` (Next.js + CopilotKit generative UI): **env-ified** all URLs into `web/app/config.ts`
+  (`NEXT_PUBLIC_API_BASE`/`_TILES_BASE`, `AGENT_URL`), deployed to **Vercel** (root dir `web/`,
+  3 env vars). Browser→Next `/api/copilotkit`→(server)→our `/agent/ag-ui` = no CORS for the agent.
+
+### CORS gauntlet (two real gotchas)
+1. base compose didn't pass `CORS_ALLOW_ORIGINS` → added it (locked to the Vercel origin).
+2. cross-origin **tiles** failed: I added an ACAO header in Caddy, but **Martin already emits its
+   own** → browser saw **two** `Access-Control-Allow-Origin` values (`*` + the origin) and rejected
+   it. Fix: **remove** Caddy's header, let Martin reflect the origin. Tiles then loaded on Vercel.
+
+### Watchdog ON in prod → 3 real incidents (bus bunching on routes 15 & 77, with reasoning).
+
+### Polish: full portfolio **README** (live link, architecture, metrics, deploy story) + hero
+screenshot `docs/proof/live_map.png` (agent drawing Davis→Kendall on the map). All CI green.
+
+### Done when ✅ a stranger can open the URL, watch live vehicles, chat with the Copilot, see it
+draw routes + cite, click a stop for ML ETAs, and read live Watchdog incidents — all true, on $0.
+
+### Standing / optional
+Finish the **12 remaining eval cases** (`python -m backend.app.evals.run`, resume-capable) +
+investigate the `trip_transfer` redundant-call loop; optionally **reserve the Oracle IP** for true
+permanence (ephemeral survives reboots but not stop/start). The build is otherwise **complete**.
