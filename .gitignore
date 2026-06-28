@@ -8,8 +8,9 @@
 # of the pattern and silently breaks the rule.
 .env
 .env.*
-# ...but DO track the example template (no real values):
+# ...but DO track the example templates (no real values):
 !.env.example
+!.env.prod.example
 
 # --- Python ---
 __pycache__/

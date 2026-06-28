@@ -82,6 +82,8 @@ async def lifespan(app: FastAPI):
     bg = [task, rag_task]
     if config.WATCHDOG_ENABLED:
         bg.append(asyncio.create_task(_watchdog_loop()))
+    if config.DB_MAINTENANCE_ENABLED:
+        bg.append(asyncio.create_task(_maintenance_loop()))
     yield
     for t in bg:
         t.cancel()
@@ -110,13 +112,42 @@ async def _watchdog_loop():
             print(f"Watchdog run failed: {exc}")
 
 
+async def _maintenance_loop():
+    """Periodic DB maintenance for managed Postgres (Neon) where TimescaleDB's TSL job
+    scheduler is unavailable: bound storage (drop_chunks), collect ML labels
+    (derive_arrivals), and refresh the rollup. Each job is independent — one failing
+    must not skip the others. Runs once shortly after startup, then every interval.
+    """
+    while True:
+        try:
+            async with pool.connection() as conn:
+                await conn.set_autocommit(True)
+                for label, sql, params in (
+                    ("retention",
+                     "SELECT drop_chunks('vehicle_positions', older_than => %s::interval)",
+                     (config.DB_RETENTION_INTERVAL,)),
+                    ("derive_arrivals", "CALL derive_arrivals()", None),
+                    ("refresh_rollup",
+                     "REFRESH MATERIALIZED VIEW route_activity_hourly", None),
+                ):
+                    try:
+                        async with conn.cursor() as cur:
+                            await cur.execute(sql, params)
+                    except Exception as exc:
+                        print(f"maintenance[{label}] failed: {exc}")
+        except Exception as exc:
+            print(f"maintenance loop error: {exc}")
+        await asyncio.sleep(config.DB_MAINTENANCE_INTERVAL_SECONDS)
+
+
 app = FastAPI(title="LiveTransit API", lifespan=lifespan)
 
-# Allow the Next.js dev frontend (a different origin) to call the API/SSE.
-# Dev-permissive; tighten to specific origins in production (Phase J).
+# Allow the browser frontend (a different origin) to call the API/SSE/WS.
+# Origins come from config (CORS_ALLOW_ORIGINS): "*" for local/dev, the exact Cloudflare
+# Pages origin(s) in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ALLOW_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

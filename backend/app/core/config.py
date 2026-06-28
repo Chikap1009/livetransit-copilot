@@ -40,3 +40,22 @@ WATCHDOG_INTERVAL_SECONDS = int(os.environ.get("WATCHDOG_INTERVAL_SECONDS", "900
 # Max agent requests per minute per client IP (a public free-tier agent must not let one
 # user drain the quota). 0 disables the limit.
 AGENT_RATE_LIMIT_PER_MIN = int(os.environ.get("AGENT_RATE_LIMIT_PER_MIN", "20"))
+
+# --- CORS (Phase J) ---
+# Comma-separated allowed origins for the browser frontend (e.g. the Cloudflare Pages URL).
+# Default "*" is convenient for local/dev; in production set it to the exact Pages origin(s).
+CORS_ALLOW_ORIGINS = [
+    o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()
+]
+
+# --- DB maintenance loop (Phase J) ---
+# Neon runs the APACHE-licensed TimescaleDB (no retention policies / continuous-aggregate
+# policies / add_job) and its pg_cron is pinned to another database. So in production the
+# API process runs these jobs itself on an interval. OFF by default (local docker uses the
+# real TimescaleDB scheduler instead).
+DB_MAINTENANCE_ENABLED = os.environ.get("DB_MAINTENANCE_ENABLED", "false").lower() in (
+    "1", "true", "yes",
+)
+DB_MAINTENANCE_INTERVAL_SECONDS = int(os.environ.get("DB_MAINTENANCE_INTERVAL_SECONDS", "600"))
+# Drop raw position chunks fully older than this (bounds storage on the 0.5 GB free tier).
+DB_RETENTION_INTERVAL = os.environ.get("DB_RETENTION_INTERVAL", "90 minutes")

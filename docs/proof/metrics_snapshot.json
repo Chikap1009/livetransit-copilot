@@ -1,0 +1,21 @@
+{
+  "captured_at_utc": "2026-06-28T16:59:36+00:00",
+  "source": "local Prometheus scrape of the live LiveTransit stack",
+  "ingestion": {
+    "total_positions_published": 152554.0,
+    "total_polls": 399.0,
+    "poll_failures": 0.0,
+    "positions_per_sec_now": 39.4,
+    "processor_messages_total": 152554.0,
+    "poll_success_rate_pct": 100.0
+  },
+  "api_latency_ms": {
+    "p50": 11.4,
+    "p95": 736.1,
+    "p99": 950.6,
+    "total_requests_observed": 4558.0
+  },
+  "live_fanout": {
+    "peak_ws_clients_15m": 5.0
+  }
+}

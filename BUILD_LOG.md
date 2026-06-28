@@ -1689,3 +1689,59 @@ fix (prompt or output handling). Tracked under [[agent-eval-pass]].
 ### Next step
 **Phase J** (deploy). The eval can be finished anytime after deploy (harness is local/independent,
 resume-capable). Standing: finish 12 remaining eval cases + investigate the trip_transfer loop.
+
+---
+
+## Entry 42 — Phase J part 1: infra decisions, Neon data layer, prod artifacts, observability proof
+**Date:** 2026-06-28
+**Phase:** J (deploy)
+
+### The infrastructure journey (matching a 24/7 ingestion workload to free tiers)
+The whole host decision was about duty cycle: free serverless tiers are priced for *bursty,
+mostly-idle* apps; a live transit tracker (~700 vehicles every 10-20s) never sleeps. Rejected, in
+order, with evidence:
+- **Upstash Redis** (free 500K cmds/month): poller alone = ~3M cmds/**day** (~180× over). Out.
+- **Neon Postgres** (free 100 CU-hrs/month, scale-to-zero can't be disabled): our constant writes
+  keep it awake 24/7 → exhausts compute in ~2 weeks. Out for the live deploy.
+- **Lesson:** the data layer belongs on the always-on compute, not a serverless tier.
+- **DigitalOcean** student credit (the planned host) **ended** ($5 left) → **Oracle Cloud Always
+  Free**. Ideal shape **Ampere A1** (24GB) is chronically capacity-constrained in-region ("Out of
+  host capacity"); fallback = **Always-Free AMD micro** (`E2.1.Micro`, 1 OCPU/1GB), free forever.
+
+### Neon set up end-to-end anyway (kept as a documented managed-PG alternative)
+Provisioned a Neon pg18 project; **all 3 extensions live + functionally verified** (PostGIS spatial
+query=244 stops downtown; pgvector cosine; Timescale hypertable). Hit the real constraint: Neon runs
+**APACHE-licensed** TimescaleDB — no retention policies, continuous-aggregate policies, `add_job`, or
+compression (all TSL). Migration 0008 failed on `add_retention_policy`. Built committed Neon-safe
+variants in **`db/migrations/neon/`** (plain matview; procedure minus `add_job`) + set 30-min chunk
+interval so `drop_chunks` can bound the 0.5GB tier. pg_cron is pinned to db `postgres` (unusable),
+so scheduling moves to an **app-side `_maintenance_loop`** (gated by `DB_MAINTENANCE_ENABLED`,
+default off) — `drop_chunks` + `derive_arrivals` + matview refresh, all smoke-tested on Neon. Loaded
+full GTFS (403/10,308/121,935/**3,345,680**/1,150); DB=393MB. **Decision: drop Neon for the live
+deploy** (run Postgres on the host → full TSL, original migrations, no limits); Neon artifacts stay
+inert as proof the app is portable to managed PG.
+
+### Prod artifacts (committable, no secrets)
+- `config.py`: `CORS_ALLOW_ORIGINS` (env), `DB_MAINTENANCE_*`, `DB_RETENTION_INTERVAL`.
+- `main.py`: `_maintenance_loop` (managed-PG fallback) + CORS now reads config (local default "*").
+- **`docker-compose.prod.yml`**: prod override (CORS lock, Grafana pw, **Cloudflare Tunnel** for
+  HTTPS w/ no open ports). Merges clean → 9 services.
+- **`.env.prod.example`**: full secret template; `.gitignore` whitelists it (`!.env.prod.example`)
+  while `.env`/`.env.prod` stay ignored. Tests green (3 pass).
+
+### Observability PROOF (the AMD micro can't run Grafana/Prometheus in 1GB — so prove it instead)
+The 1GB box runs the full functional system; only the **dashboard containers** (~250MB) are dropped
+(`/metrics` still served; Langfuse agent traces still live in prod). Captured hard proof from the
+full local stack under generated load (152,554 positions, **0 poll failures = 100%**, processor
+exactly 1:1 = idempotent exactly-once, p50 11.4ms, peak 5 WS clients, 4,558 reqs):
+- **`docs/proof/metrics_overview.png`** — charts rendered from real Prometheus `query_range` data.
+- **`docs/proof/metrics_snapshot.json`** — the captured numbers.
+- **`docs/proof/grafana_live.gif`** — the live interactive dashboard recorded under load.
+- **`docs/deployment.md`** — honest "couldn't show live on a 1GB box, here's proof" write-up +
+  one-command repro (`docker compose up grafana prometheus`).
+
+### Next step
+Provision the **Oracle AMD micro** (E2.1.Micro), add swap, deploy the trimmed stack (Postgres+Redis
++API+poller+processor+tiles+cloudflared) + HTTPS via Cloudflare Tunnel, deploy `web/` to Cloudflare
+Pages, lock CORS to the Pages origin, README + proof links. Stopgap available: Cloudflare quick
+tunnel from the laptop for an instant public URL. Standing: A1 retry at off-peak; finish 12 evals.
