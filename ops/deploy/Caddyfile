@@ -4,7 +4,9 @@
 {$LT_DOMAIN} {
 	# Vector tiles (Martin) under /tiles/* -> the tiles service (prefix stripped):
 	# /tiles/route_shapes/{z}/{x}/{y} -> Martin's /route_shapes/{z}/{x}/{y}.
+	# Public map geometry — allow any origin (the Vercel frontend fetches these cross-origin).
 	handle_path /tiles/* {
+		header Access-Control-Allow-Origin "*"
 		reverse_proxy tiles:3000
 	}
 	# Everything else -> the API (REST, the agent, WebSockets, and the /web live map).

@@ -61,6 +61,7 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
       AGENT_RATE_LIMIT_PER_MIN: ${AGENT_RATE_LIMIT_PER_MIN:-20}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}        # lock to the frontend origin in prod
     ports:
       - "8000:8000"
     volumes:
