@@ -6,6 +6,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import StopPanel from './StopPanel';
+import { TILES_BASE, WS_URL } from '../config';
 
 const NO_ROUTE = '__none__';
 
@@ -14,9 +15,6 @@ type TripLeg = {
   fromLat: number; fromLon: number; fromLabel: string;
   toLat: number; toLon: number; toLabel: string;
 };
-
-const TILES = 'http://localhost:3000';            // Martin tile server
-const WS_URL = 'ws://localhost:8000/ws/vehicles'; // live vehicle feed
 
 const SUBWAY_COLORS: maplibregl.ExpressionSpecification = [
   'match', ['get', 'route_id'],
@@ -49,7 +47,7 @@ export default function LiveMap() {
 
     map.on('load', () => {
       // Real MBTA network from Martin vector tiles, beneath the dots.
-      map.addSource('routes', { type: 'vector', url: `${TILES}/route_shapes` });
+      map.addSource('routes', { type: 'vector', tiles: [`${TILES_BASE}/route_shapes/{z}/{x}/{y}`], maxzoom: 16 });
       map.addLayer({
         id: 'routes', type: 'line', source: 'routes', 'source-layer': 'route_shapes',
         paint: { 'line-color': ['get', 'route_color'], 'line-width': 2, 'line-opacity': 0.85 },
@@ -67,7 +65,7 @@ export default function LiveMap() {
         filter: ['==', ['get', 'route_id'], NO_ROUTE],
         paint: { 'line-color': '#18ffff', 'line-width': 4, 'line-opacity': 1, 'line-blur': 1 },
       });
-      map.addSource('stops', { type: 'vector', url: `${TILES}/stops` });
+      map.addSource('stops', { type: 'vector', tiles: [`${TILES_BASE}/stops/{z}/{x}/{y}`], maxzoom: 16 });
       map.addLayer({
         id: 'stops', type: 'circle', source: 'stops', 'source-layer': 'stops', minzoom: 13,
         paint: {

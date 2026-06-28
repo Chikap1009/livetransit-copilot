@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../config';
 
-const INCIDENTS_URL = 'http://localhost:8000/incidents?limit=8';
+const INCIDENTS_URL = `${API_BASE}/incidents?limit=8`;
 const POLL_MS = 30000;
 
 type Incident = {

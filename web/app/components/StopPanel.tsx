@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-const API = 'http://localhost:8000';
+import { API_BASE as API } from '../config';
 
 type Arrival = {
   route_id: string;
