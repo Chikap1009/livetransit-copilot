@@ -1617,3 +1617,39 @@ limiting + caching/fallback/degradation/depth-cap. Optional request queue deferr
 Phase H **Concept Check** (tracing vs logs/metrics; what to cache + staleness; fallback as config;
 why public agents need rate limiting). Then **Phase I** (MCP server) or **Phase 7-9 already done** →
 **Phase J** (deploy). Pending: retrain + full eval pass + watch a Langfuse trace (all need quota/data).
+
+---
+
+## Entry 40 — Phase I: MCP server exposing the tools; PHASE I COMPLETE
+**Date:** 2026-06-28
+**Phase:** Phase I (MCP) — Phase H Concept Check PASSED first (all 4: tracing vs metrics; cache +
+short-TTL staleness; fallback = config/keys not code; public agent needs per-user limits)
+
+### Concepts taught (2B.9)
+- **MCP** = open standard ("USB-C for AI tools"): expose capabilities once, any MCP host (Claude
+  Desktop, Cursor) plugs in with no custom glue. Offers **Tools** (callable), **Resources**
+  (readable data), **Prompts** (templates) over JSON-RPC; transport = **stdio** (local subprocess,
+  Claude Desktop) or **Streamable HTTP** (networked).
+- Key point for us: the MCP server exposes only DATA tools — the HOST brings the LLM — so it uses
+  **no LLM quota**.
+
+### What we did
+- `backend/app/mcp/server.py` — a **FastMCP** server (`mcp==1.28.1`) exposing the SAME six
+  read-only functions the agent uses (`get_vehicle_positions`, `predict_eta`, `get_service_alerts`,
+  `plan_trip`, `search_docs`, `get_weather`) — no logic duplication, already read-only (guardrail).
+  Lazy DB pool; Windows SelectorEventLoop set for psycopg; `transport=stdio` default,
+  `http` arg → Streamable HTTP. Does NOT import the gateway, so no model build / no keys needed.
+- `docs/mcp.md` — Claude Desktop `claude_desktop_config.json` snippet + Streamable HTTP + a quick
+  local client check.
+
+### Verified (quota-free)
+- An MCP **client** over stdio: `list_tools()` → all 6 exposed; `get_vehicle_positions(Red)` →
+  live count; `get_service_alerts(Blue)` → 2 alerts; `plan_trip(Kendall→Boylston)` → real
+  1-transfer 12-min route. ruff clean.
+
+### Phase I status: ✅ COMPLETE. External MCP hosts can list + call the tools for live transit data.
+
+### Next step
+Phase I **Concept Check** (what MCP is + problem it solves; Tools vs Resources vs Prompts; why a
+standard beats custom integrations). Then **Phase J** (deploy: Neon + Upstash + droplet + Cloudflare
+Pages + R2 + prod secrets + live URL). Standing: retrain + full eval pass + watch a Langfuse trace.
